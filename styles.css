@@ -1,0 +1,395 @@
+/* ═══════════════════════════════════════════════
+   GLOBAL RESET & BASE
+═══════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --clr-bg-dark:    #1a0a0a;
+  --clr-dark-red:   #5c0a0a;
+  --clr-mid-red:    #8b1a1a;
+  --clr-accent:     #c0392b;
+  --clr-needle:     #222;
+  --clr-cream:      #f5e9d0;
+  --clr-gold:       #c8a95a;
+  --clr-string-bg:  #2b1a0d;
+  --clr-fret:       #d4c4a0;
+  --clr-wood:       #3d2410;
+  --nav-h:          56px;
+  --tuner-h:        calc(45vh);
+  --font-serif:     'Georgia', serif;
+  --font-sans:      'Arial', sans-serif;
+  --transition:     0.25s ease;
+}
+
+html, body {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: var(--clr-bg-dark);
+  font-family: var(--font-sans);
+  color: #fff;
+  touch-action: manipulation;
+}
+
+/* ═══════════════════════════════════════════════
+   LAYOUT
+═══════════════════════════════════════════════ */
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* ═══════════════════════════════════════════════
+   TUNER PANEL
+═══════════════════════════════════════════════ */
+#tuner-panel {
+  flex: 0 0 auto;
+  background: linear-gradient(180deg, #3a0808 0%, #1f0505 100%);
+  border-bottom: 3px solid var(--clr-gold);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 0 8px;
+  position: relative;
+}
+
+/* ── Dial meter ── */
+#meter-container {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 0;
+  position: relative;
+}
+
+#meter-bg {
+  position: relative;
+  width: 320px;
+  height: 180px;
+}
+
+#meter-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+#indicator-light {
+  position: absolute;
+  bottom: 0px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  border: 4px solid #6a1010;
+  box-shadow: 0 0 18px rgba(0,0,0,0.8);
+  transition: background 0.15s, box-shadow 0.15s;
+  z-index: 5;
+}
+
+.light-red {
+  background: radial-gradient(circle at 38% 35%, #ff6666, #cc0000 55%, #7a0000);
+  box-shadow: 0 0 24px rgba(255, 0, 0, 0.6), 0 0 6px #000;
+}
+
+.light-green {
+  background: radial-gradient(circle at 38% 35%, #aaffaa, #00cc44 55%, #007a22);
+  box-shadow: 0 0 24px rgba(0, 255, 80, 0.6), 0 0 6px #000;
+}
+
+.light-yellow {
+  background: radial-gradient(circle at 38% 35%, #ffee88, #ccaa00 55%, #887000);
+  box-shadow: 0 0 24px rgba(255, 220, 0, 0.5), 0 0 6px #000;
+}
+
+/* ── Note Wheel ── */
+#note-wheel-section {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  padding: 4px 8px 0;
+  gap: 6px;
+  position: relative;
+}
+
+#note-wheel-label {
+  font-size: 11px;
+  color: var(--clr-gold);
+  font-style: italic;
+  font-family: var(--font-serif);
+  white-space: nowrap;
+  align-self: flex-end;
+  padding-bottom: 2px;
+}
+
+#note-wheel {
+  flex: 1;
+  height: 50px;
+  background: linear-gradient(135deg, #2a0505 0%, #1a0303 100%);
+  border: 2px solid #5a0a0a;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.note-item {
+  flex: 1;
+  text-align: center;
+  font-weight: bold;
+  user-select: none;
+  transition: all var(--transition);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.note-far {
+  font-size: 18px;
+  color: #7a4040;
+  opacity: 0.6;
+}
+
+.note-near {
+  font-size: 22px;
+  color: #b06060;
+  opacity: 0.8;
+}
+
+.note-current {
+  flex: 0 0 80px;
+  flex-direction: column;
+  position: relative;
+}
+
+#note-curr-inner {
+  font-size: 28px;
+  font-weight: bold;
+  color: #fff;
+  text-shadow: 0 0 8px rgba(255,255,255,0.4);
+  position: relative;
+  z-index: 2;
+  /* sharp/flat superscript handled in JS */
+  line-height: 1;
+}
+
+/* centre highlight box */
+.note-current::before {
+  content: '';
+  position: absolute;
+  inset: 4px 4px;
+  border: 2px solid var(--clr-gold);
+  border-radius: 4px;
+  background: rgba(200,169,90,0.08);
+  pointer-events: none;
+}
+
+/* bottom pointer */
+#wheel-marker {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-bottom: 10px solid var(--clr-gold);
+  z-index: 10;
+}
+
+#settings-btn {
+  background: none;
+  border: 1px solid #5a0a0a;
+  border-radius: 6px;
+  color: var(--clr-gold);
+  font-size: 20px;
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ═══════════════════════════════════════════════
+   FRETBOARD PANEL
+═══════════════════════════════════════════════ */
+#fretboard-panel {
+  flex: 1 1 0;
+  display: flex;
+  background: linear-gradient(90deg, #1a0d06 0%, #2b1a0d 15%, #3d2410 100%);
+  overflow: hidden;
+  position: relative;
+  min-height: 0;
+}
+
+/* Rotated label column */
+#fretboard-label {
+  writing-mode: vertical-lr;
+  transform: rotate(180deg);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly;
+  align-items: center;
+  font-size: 13px;
+  font-weight: bold;
+  color: rgba(255,255,255,0.55);
+  padding: 8px 4px;
+  min-width: 32px;
+  white-space: nowrap;
+  gap: 8px;
+  letter-spacing: 1px;
+}
+
+/* Strings area */
+#strings-container {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-around;
+  padding: 12px 0;
+  overflow: hidden;
+}
+
+#fretboard-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+#strings-list {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-around;
+  height: 100%;
+  padding: 4px 0;
+}
+
+.string-row {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  position: relative;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.string-row:hover { background: rgba(255,255,255,0.04); }
+.string-row.active { background: rgba(200,169,90,0.08); }
+
+/* Peg button */
+.string-peg {
+  width: 70px;
+  height: 34px;
+  background: radial-gradient(circle at 40% 35%, #e0d8cc, #a89878 55%, #7a6850);
+  border-radius: 17px 17px 17px 17px;
+  border: 2px solid #8a7860;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 10px;
+  font-weight: bold;
+  font-size: 14px;
+  color: #3a2a10;
+  box-shadow: 2px 2px 6px rgba(0,0,0,0.5), inset 0 1px 2px rgba(255,255,255,0.3);
+  user-select: none;
+  position: relative;
+  z-index: 3;
+  flex-shrink: 0;
+}
+
+.string-peg .note-name { font-size: 14px; }
+.string-peg .octave    { font-size: 10px; vertical-align: sub; }
+
+/* The string line stretches to the right */
+.string-line {
+  flex: 1;
+  height: var(--sw, 2px);
+  background: linear-gradient(90deg, #c0a878, #e8d8b0 30%, #b09060 70%, #806840);
+  border-radius: 1px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.6), 0 -1px 1px rgba(255,255,255,0.15);
+  position: relative;
+}
+
+/* ═══════════════════════════════════════════════
+   NAVIGATION BAR
+═══════════════════════════════════════════════ */
+#navbar {
+  flex: 0 0 var(--nav-h);
+  background: #0d0d0d;
+  border-top: 1px solid #333;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+}
+
+.nav-btn {
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 22px;
+  padding: 8px 16px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: color var(--transition), background var(--transition);
+}
+
+.nav-btn.active, .nav-btn:hover {
+  color: var(--clr-gold);
+  background: rgba(200,169,90,0.1);
+}
+
+/* ═══════════════════════════════════════════════
+   MIC PERMISSION OVERLAY
+═══════════════════════════════════════════════ */
+#mic-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.85);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  z-index: 100;
+}
+
+#mic-overlay h2 { font-size: 20px; color: #fff; }
+#mic-overlay p  { font-size: 14px; color: #aaa; text-align: center; padding: 0 24px; }
+
+#mic-btn {
+  background: var(--clr-accent);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 12px 28px;
+  font-size: 16px;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(192,57,43,0.4);
+}
+
+#mic-btn:hover { background: #a93226; }
+
+/* ═══════════════════════════════════════════════
+   RESPONSIVE tweaks
+═══════════════════════════════════════════════ */
+@media (min-height: 700px) {
+  #meter-bg { height: 200px; }
+}
+
+@media (max-height: 550px) {
+  #meter-bg { height: 140px; }
+  #note-wheel { height: 40px; }
+}

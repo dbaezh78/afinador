@@ -25,14 +25,10 @@
       <div id="note-wheel-section">
         <span id="note-wheel-label">Rueda de notas</span>
         <div id="note-wheel">
-          <div id="note-prev2" class="note-item note-far"></div>
-          <div id="note-prev"  class="note-item note-near"></div>
-          <div id="note-curr" class="note-item note-current">
-            <div id="note-curr-inner"></div>
-          </div>
-          <div id="note-next"  class="note-item note-near"></div>
-          <div id="note-next2" class="note-item note-far"></div>
-          <!-- centre marker -->
+          <!-- Scrollable note track, built by JS -->
+          <div id="note-track"></div>
+          <!-- Fixed centre highlight box + bottom pointer -->
+          <div id="wheel-center-box"></div>
           <div id="wheel-marker"></div>
         </div>
         <button id="settings-btn" title="Ajustes">⚙</button>

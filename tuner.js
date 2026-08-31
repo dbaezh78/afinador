@@ -134,10 +134,11 @@ function buildNoteTrack() {
 let lastNoteIdx = -1; // track which index was last centred
 
 // DOM refs for the LCD display inside the indicator circle
-const nicNote = document.getElementById('nic-note');
-const nicOct  = document.getElementById('nic-oct');
+const nicNote   = document.getElementById('nic-note');
+const nicOct    = document.getElementById('nic-oct');
+const freqValEl = document.getElementById('freq-val');
 
-function updateNoteWheel(note, cents, octave = 4) {
+function updateNoteWheel(note, cents, octave = 4, frequency = null) {
   const baseIdx = NOTES.indexOf(note);
   if (baseIdx === -1) return;
 
@@ -164,6 +165,19 @@ function updateNoteWheel(note, cents, octave = 4) {
     // Update LCD display inside the indicator circle
     if (nicNote) nicNote.textContent = note;
     if (nicOct)  nicOct.textContent  = octave;
+  }
+
+  // Update frequency (Hz / exact tuning pitch) readout below circle
+  if (freqValEl) {
+    if (frequency && frequency > 0) {
+      freqValEl.textContent = frequency.toFixed(1);
+    } else if (NOTE_FREQS[note]) {
+      // Calculate octave adjusted frequency based on standard table
+      const baseFreq = NOTE_FREQS[note]; // 4th octave (e.g. A4=440)
+      const octOffset = octave - 4;
+      const targetHz = baseFreq * Math.pow(2, octOffset);
+      freqValEl.textContent = targetHz.toFixed(1);
+    }
   }
 
   // Indicator light colour
@@ -470,24 +484,24 @@ function drawMeter(angleDeg) {
 
   mCtx.clearRect(0, 0, W, H);
 
-  // ── Pivot: bottom-centre aligned with the 76px indicator light centre ──
+  // ── Pivot: aligned with the 82px indicator light centre (bottom: 26px + 41px = 67px from bottom) ──
   const cx  = W / 2;
-  const cy  = H - 38;                               // half of 76px indicator
-  const R   = Math.min(W * 0.50, cy - 6);           // use more of the canvas width
+  const cy  = H - 67;
+  const R   = Math.min(W * 0.49, cy - 8);
 
   const startA = Math.PI * 1.05;   // ~189° — wide left edge
-  const endA   = Math.PI * 1.95;   // ~351° — wide right edge  (162° total sweep)
+  const endA   = Math.PI * 1.95;   // ~351° — wide right edge
   const span   = endA - startA;
 
-  // ── Cream dial face (pie slice) ──────────────────────
+  // ── Cream dial face ──────────────────────
   mCtx.beginPath();
   mCtx.moveTo(cx, cy);
   mCtx.arc(cx, cy, R * 1.01, startA, endA);
   mCtx.closePath();
   const grad = mCtx.createRadialGradient(cx, cy - R * 0.35, R * 0.05, cx, cy, R);
-  grad.addColorStop(0,    '#f8edd4');
-  grad.addColorStop(0.55, '#ecdbb5');
-  grad.addColorStop(1,    '#c8b48a');
+  grad.addColorStop(0,    '#fbf1db');
+  grad.addColorStop(0.6,  '#f0e0be');
+  grad.addColorStop(1,    '#cfbb91');
   mCtx.fillStyle = grad;
   mCtx.fill();
 
@@ -506,21 +520,21 @@ function drawMeter(angleDeg) {
     const cos   = Math.cos(angle);
     const sin   = Math.sin(angle);
 
-    const r1 = R * (major ? 0.80 : 0.87);
+    const r1 = R * (major ? 0.79 : 0.86);
     const r2 = R * 0.93;
 
     mCtx.beginPath();
     mCtx.moveTo(cx + cos * r1, cy + sin * r1);
     mCtx.lineTo(cx + cos * r2, cy + sin * r2);
-    mCtx.strokeStyle = major ? '#555' : '#999';
+    mCtx.strokeStyle = major ? '#444' : '#888';
     mCtx.lineWidth   = major ? 2 : 1;
     mCtx.stroke();
 
     if (major) {
-      const rL  = R * 0.72;
+      const rL  = R * 0.70;
       const txt = v === 0 ? '0' : (v > 0 ? `+${v}` : `${v}`);
-      mCtx.font         = `bold ${Math.max(9, Math.round(R * 0.048))}px Arial`;
-      mCtx.fillStyle    = '#333';
+      mCtx.font         = `bold ${Math.max(10, Math.round(R * 0.05))}px Arial`;
+      mCtx.fillStyle    = '#2e261e';
       mCtx.textAlign    = 'center';
       mCtx.textBaseline = 'middle';
       mCtx.fillText(txt, cx + cos * rL, cy + sin * rL);
@@ -528,41 +542,41 @@ function drawMeter(angleDeg) {
   }
 
   // "cent" label (bottom-left)
-  mCtx.font         = `italic ${Math.max(8, Math.round(R * 0.042))}px Georgia`;
-  mCtx.fillStyle    = '#777';
+  mCtx.font         = `italic ${Math.max(9, Math.round(R * 0.044))}px Georgia`;
+  mCtx.fillStyle    = '#6b5842';
   mCtx.textAlign    = 'left';
   mCtx.textBaseline = 'alphabetic';
-  mCtx.fillText('cent', cx - R * 0.9, cy - R * 0.05);
+  mCtx.fillText('cent', cx - R * 0.88, cy - R * 0.04);
 
-  // Watermark
+  // Watermark text
   mCtx.save();
-  mCtx.font      = `italic bold ${Math.round(R * 0.07)}px Georgia`;
-  mCtx.fillStyle = 'rgba(120,80,40,0.15)';
+  mCtx.font      = `italic bold ${Math.round(R * 0.075)}px Georgia`;
+  mCtx.fillStyle = 'rgba(120,80,40,0.14)';
   mCtx.textAlign = 'center';
   mCtx.textBaseline = 'middle';
   mCtx.translate(cx, cy - R * 0.44);
-  mCtx.rotate(-0.14);
+  mCtx.rotate(-0.12);
   mCtx.fillText('Afinador Pro', 0, 0);
   mCtx.restore();
 
-  // Green centre zone highlight
+  // Green centre zone highlight (in tune range ±5 cents)
   const zH = (IN_TUNE_CENTS / 100) * span;
   const cA  = startA + 0.5 * span;
   mCtx.beginPath();
   mCtx.moveTo(cx, cy);
   mCtx.arc(cx, cy, R * 0.94, cA - zH, cA + zH);
   mCtx.closePath();
-  mCtx.fillStyle = 'rgba(0, 200, 80, 0.08)';
+  mCtx.fillStyle = 'rgba(40, 180, 70, 0.16)';
   mCtx.fill();
 
   // ── Needle ───────────────────────────────────────────
   const nAngle = startA + ((angleDeg + 50) / 100) * span;
-  const nLen   = R * 0.90;
+  const nLen   = R * 0.92;
   const nCos   = Math.cos(nAngle);
   const nSin   = Math.sin(nAngle);
 
   mCtx.save();
-  mCtx.shadowColor   = 'rgba(0,0,0,0.3)';
+  mCtx.shadowColor   = 'rgba(0,0,0,0.35)';
   mCtx.shadowBlur    = 5;
   mCtx.shadowOffsetX = 2;
   mCtx.shadowOffsetY = 2;
@@ -570,17 +584,17 @@ function drawMeter(angleDeg) {
   mCtx.beginPath();
   mCtx.moveTo(cx, cy);
   mCtx.lineTo(cx + nCos * nLen, cy + nSin * nLen);
-  mCtx.strokeStyle = '#111';
-  mCtx.lineWidth   = 2.5;
+  mCtx.strokeStyle = '#1a1010';
+  mCtx.lineWidth   = 2.6;
   mCtx.lineCap     = 'round';
   mCtx.stroke();
   mCtx.restore();
 
-  // Pivot dot (drawn on top so it hides needle base)
+  // Pivot dot (drawn on top)
   mCtx.beginPath();
-  mCtx.arc(cx, cy, 6, 0, Math.PI * 2);
-  const pivGrad = mCtx.createRadialGradient(cx - 2, cy - 2, 1, cx, cy, 6);
-  pivGrad.addColorStop(0, '#555');
+  mCtx.arc(cx, cy, 6.5, 0, Math.PI * 2);
+  const pivGrad = mCtx.createRadialGradient(cx - 2, cy - 2, 1, cx, cy, 6.5);
+  pivGrad.addColorStop(0, '#666');
   pivGrad.addColorStop(1, '#111');
   mCtx.fillStyle = pivGrad;
   mCtx.fill();
@@ -763,6 +777,8 @@ function getStableNote() {
   return { note, octave: parseInt(octStr) };
 }
 
+let displayFreq = 440.0;
+
 function loop() {
   if (!isRunning) return;
   animFrame = requestAnimationFrame(loop);
@@ -776,7 +792,7 @@ function loop() {
     const detected = freqToNote(freq);
 
     if (detected) {
-      let { note, octave, cents } = detected;
+      let { note, octave, cents, freq: detFreq } = detected;
 
       if (lockedString !== null) {
         // Compute cents relative to the locked string's exact frequency
@@ -786,6 +802,7 @@ function loop() {
         cents         = Math.max(-50, Math.min(50, (dMidi - tMidi) * 100));
         note          = target.note.replace(/\d/, '');
         octave        = target.octave;
+        detFreq       = target.freq;
       }
 
       // Push into history buffer for stability voting
@@ -795,6 +812,7 @@ function loop() {
       // Smooth the cents deviation continuously
       displayCents = displayCents + SMOOTH * (cents - displayCents);
       targetAngle  = Math.max(-50, Math.min(50, displayCents));
+      displayFreq  = detFreq;
 
       // Only commit a new note when history votes agree
       const stable = getStableNote();
@@ -818,7 +836,7 @@ function loop() {
   drawMeter(needleAngle);
 
   // ── Update wheel & circle ──
-  if (isRunning) updateNoteWheel(displayNote || 'E', displayCents, displayOctave);
+  if (isRunning) updateNoteWheel(displayNote || 'E', displayCents, displayOctave, displayFreq);
 }
 
 // ═══════════════════════════════════════════════════════

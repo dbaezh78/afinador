@@ -35,6 +35,15 @@ const MIN_CONF       = 0.90;
 const CELL_W         = 72;   // must match CSS --cell-w
 
 // ═══════════════════════════════════════════════════════
+//  EXACT REFERENCE FREQUENCIES (Equal temperament, A4=440)
+// ═══════════════════════════════════════════════════════
+const NOTE_FREQS = {
+  'C': 261.63, 'C#': 277.18, 'D': 293.66, 'D#': 311.13,
+  'E': 329.63, 'F': 349.23, 'F#': 369.99, 'G': 392.00,
+  'G#': 415.30, 'A': 440.00, 'A#': 466.16, 'B': 493.88
+};
+
+// ═══════════════════════════════════════════════════════
 //  STATE
 // ═══════════════════════════════════════════════════════
 let audioCtx = null;
@@ -45,8 +54,17 @@ let animFrame;
 
 let displayCents  = 0;
 let displayNote   = 'E';
+let displayOctave = 4;       // octave of the detected note
 let needleAngle   = 0;
 let targetAngle   = 0;
+
+// ── Note stability: vote from last N frames before committing a note change ──
+const NOTE_HIST_SIZE = 14;   // frames to average
+let   noteHistory    = [];   // [{note, octave}]
+
+// String vibration state
+let vibrationEnabled  = true;
+const activeVibrations = new Map();
 
 // ═══════════════════════════════════════════════════════
 //  DOM REFS
@@ -115,7 +133,11 @@ function buildNoteTrack() {
 
 let lastNoteIdx = -1; // track which index was last centred
 
-function updateNoteWheel(note, cents) {
+// DOM refs for the LCD display inside the indicator circle
+const nicNote = document.getElementById('nic-note');
+const nicOct  = document.getElementById('nic-oct');
+
+function updateNoteWheel(note, cents, octave = 4) {
   const baseIdx = NOTES.indexOf(note);
   if (baseIdx === -1) return;
 
@@ -137,8 +159,11 @@ function updateNoteWheel(note, cents) {
       if      (dist === 0) cell.classList.add('is-current');
       else if (dist === 1) cell.classList.add('near-1');
       else if (dist === 2) cell.classList.add('near-2');
-      // else remains dim
     });
+
+    // Update LCD display inside the indicator circle
+    if (nicNote) nicNote.textContent = note;
+    if (nicOct)  nicOct.textContent  = octave;
   }
 
   // Indicator light colour
@@ -168,7 +193,10 @@ function buildFretboard() {
       <div class="string-peg">
         <span class="note-name">${str.name}</span><span class="octave">${str.octave}</span>
       </div>
-      <div class="string-line" style="--sw:${sw}px"></div>
+      <div class="string-line-wrap">
+        <div class="string-line" style="--sw:${sw}px"></div>
+        <canvas class="string-vibe-canvas"></canvas>
+      </div>
     `;
 
     row.addEventListener('click', () => handleStringTap(origIdx, row));
@@ -177,19 +205,21 @@ function buildFretboard() {
 }
 
 function handleStringTap(idx, rowEl) {
-  // Play the string's note
-  playKarplusStrong(GUITAR_STRINGS[idx].freq);
+  // Improved guitar sound
+  playKarplusStrong(GUITAR_STRINGS[idx].freq, idx);
 
-  // Toggle lock
+  // Visual vibration
+  startStringVibration(idx, rowEl);
+
+  // Toggle string lock
   document.querySelectorAll('.string-row').forEach(r => r.classList.remove('active'));
   if (lockedString === idx) {
     lockedString = null;
   } else {
     lockedString = idx;
     rowEl.classList.add('active');
-    // Snap wheel to that string's note
     const s = GUITAR_STRINGS[idx];
-    const noteName = s.note.replace(/\d/, ''); // strip octave number
+    const noteName = s.note.replace(/\d/, '');
     displayNote = noteName;
     updateNoteWheel(noteName, 0);
   }
@@ -205,48 +235,202 @@ function ensureAudioCtx() {
   if (audioCtx.state === 'suspended') audioCtx.resume();
 }
 
-// ── Karplus-Strong plucked string synthesis ──────────
-function playKarplusStrong(freq, duration = 3.0) {
+// ── Improved Karplus-Strong — guitar-optimised ────────
+/**
+ * @param {number} freq       - Target frequency in Hz
+ * @param {number} stringIdx  - 0 (E2, thickest) … 5 (E4, thinnest)
+ */
+function playKarplusStrong(freq, stringIdx = 3) {
   ensureAudioCtx();
 
-  const sr         = audioCtx.sampleRate;
-  const period     = Math.round(sr / freq);
+  const sr      = audioCtx.sampleRate;
+  const period  = Math.round(sr / freq);
+
+  // String characteristics
+  // Lower (wound) strings: darker tone, longer sustain
+  const isWound   = stringIdx <= 2;
+  const pickPos   = isWound ? 0.12 : 0.18;   // closer to bridge = brighter
+  const damping   = isWound
+    ? 0.4975 + stringIdx * 0.0002            // wound  → slightly less damping
+    : 0.4970 - (stringIdx - 3) * 0.0002;    // plain  → slightly more damping
+  const duration  = 3.5 - stringIdx * 0.25;  // thicker strings sustain longer
   const totalSamps = Math.round(sr * duration);
 
   const offBuf = audioCtx.createBuffer(1, totalSamps, sr);
   const data   = offBuf.getChannelData(0);
 
-  // Initialise ring buffer with white noise
+  // ── Excitation: white noise pre-filtered by pick position ──
   const ring = new Float32Array(period);
   for (let i = 0; i < period; i++) ring[i] = Math.random() * 2 - 1;
 
-  // Karplus-Strong averaging filter
+  // Moving-average passes simulate the pick-position filter:
+  // fewer passes = brighter (bridge pick), more = darker (neck pick)
+  const passes = Math.max(1, Math.round(pickPos * period * 0.8));
+  for (let p = 0; p < passes; p++) {
+    for (let i = 0; i < period; i++) {
+      ring[i] = 0.5 * (ring[i] + ring[(i + 1) % period]);
+    }
+  }
+
+  // ── Karplus-Strong main loop ──
   for (let i = 0; i < totalSamps; i++) {
-    const idx0 = i       % period;
-    const idx1 = (i + 1) % period;
-    ring[idx0] = 0.498 * (ring[idx0] + ring[idx1]);
-    data[i]    = ring[idx0];
+    const i0 = i % period;
+    const i1 = (i + 1) % period;
+    ring[i0]  = damping * (ring[i0] + ring[i1]);
+    data[i]   = ring[i0];
   }
 
   const src  = audioCtx.createBufferSource();
   src.buffer = offBuf;
 
-  // Gentle volume envelope so it doesn't clip
+  // Attack-decay gain envelope
   const gain = audioCtx.createGain();
-  gain.gain.setValueAtTime(0.75, audioCtx.currentTime);
+  gain.gain.setValueAtTime(0, audioCtx.currentTime);
+  gain.gain.linearRampToValueAtTime(0.72, audioCtx.currentTime + 0.003);
   gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
 
-  // Light low-pass to soften harshness
+  // Low-pass: remove aliasing, tune brightness per string
   const lp = audioCtx.createBiquadFilter();
-  lp.type = 'lowpass';
-  lp.frequency.value = Math.min(freq * 8, 6000);
-  lp.Q.value = 0.5;
+  lp.type            = 'lowpass';
+  lp.frequency.value = isWound ? Math.min(freq * 12, 8000) : Math.min(freq * 9, 6500);
+  lp.Q.value         = 0.8;
 
-  src.connect(lp);
+  // Body resonance peak (~200-400 Hz for low strings, ~600 Hz for high)
+  const body = audioCtx.createBiquadFilter();
+  body.type            = 'peaking';
+  body.frequency.value = isWound ? 250 + stringIdx * 40 : 600 + stringIdx * 80;
+  body.gain.value      = isWound ? 4 : 2.5;
+  body.Q.value         = 1.8;
+
+  // Slight high-frequency presence boost for plain strings
+  let chain = src;
+  src.connect(body);
+  body.connect(lp);
   lp.connect(gain);
   gain.connect(audioCtx.destination);
+
   src.start();
   src.stop(audioCtx.currentTime + duration);
+}
+
+// ═══════════════════════════════════════════════════════
+//  STRING VIBRATION  — standing-wave animation
+// ═══════════════════════════════════════════════════════
+/**
+ * Draws a decaying standing-wave on the string-vibe-canvas overlaid on the
+ * string row. Cancelled automatically when vibrationEnabled is false.
+ *
+ * @param {number}      stringIdx  - 0…5 (thickest to thinnest)
+ * @param {HTMLElement} rowEl      - .string-row element
+ */
+function startStringVibration(stringIdx, rowEl) {
+  if (!vibrationEnabled) return;
+
+  // Cancel any previous vibration on this string
+  if (activeVibrations.has(stringIdx)) {
+    cancelAnimationFrame(activeVibrations.get(stringIdx));
+    activeVibrations.delete(stringIdx);
+  }
+
+  const vibeCanvas = rowEl.querySelector('.string-vibe-canvas');
+  const stringLine = rowEl.querySelector('.string-line');
+  if (!vibeCanvas || !stringLine) return;
+
+  // Get dimensions from the wrap (parent of canvas)
+  const wrap  = vibeCanvas.parentElement;
+  const wRect = wrap.getBoundingClientRect();
+  const dpr   = window.devicePixelRatio || 1;
+  const W     = wRect.width;
+  const H     = wRect.height;
+
+  vibeCanvas.width        = Math.round(W * dpr);
+  vibeCanvas.height       = Math.round(H * dpr);
+  vibeCanvas.style.width  = W + 'px';
+  vibeCanvas.style.height = H + 'px';
+
+  const vCtx = vibeCanvas.getContext('2d');
+  vCtx.scale(dpr, dpr);
+
+  const CY  = H / 2;
+  const sw  = parseFloat(stringLine.style.getPropertyValue('--sw')) || 2;
+
+  // Visual oscillation rate: thicker strings appear to move slower
+  const vizHz   = 5 + stringIdx * 0.6;   // 5 Hz (E2) … 8 Hz (E4)
+  const vibMs   = 2800;                   // total animation duration
+  const startT  = performance.now();
+
+  // Show canvas, hide static line
+  vibeCanvas.style.display = 'block';
+  stringLine.style.opacity = '0';
+
+  function frame(now) {
+    const elapsed = now - startT;
+    const t       = Math.min(elapsed / vibMs, 1);
+
+    if (t >= 1) {
+      // Vibration done — restore static string
+      vCtx.clearRect(0, 0, W, H);
+      vibeCanvas.style.display = 'none';
+      stringLine.style.opacity = '1';
+      activeVibrations.delete(stringIdx);
+      return;
+    }
+
+    // Exponential amplitude decay
+    const decay    = Math.exp(-4.5 * t);
+    const maxAmp   = Math.max(sw * 0.5, H * 0.34 * decay);
+    const tSec     = elapsed / 1000;
+
+    vCtx.clearRect(0, 0, W, H);
+
+    // ── Draw standing wave with 3 harmonics ──────────────
+    // y(x,t) = Σ Aₙ · sin(n·π·x) · cos(n·ω·t) · decayₙ
+    // x is normalised 0→1, ends fixed at 0 and 1
+    vCtx.beginPath();
+    for (let px = 0; px <= W; px++) {
+      const x = px / W;
+
+      // Fundamental + 2nd + 3rd harmonic (each decays faster)
+      const h1 = Math.sin(Math.PI * x)     * Math.cos(2 * Math.PI * vizHz * tSec);
+      const h2 = Math.sin(2 * Math.PI * x) * Math.cos(4 * Math.PI * vizHz * tSec)
+                 * Math.exp(-1.2 * t);
+      const h3 = Math.sin(3 * Math.PI * x) * Math.cos(6 * Math.PI * vizHz * tSec)
+                 * Math.exp(-2.5 * t);
+
+      const dy = (h1 + h2 * 0.35 + h3 * 0.12) * maxAmp;
+
+      if (px === 0) vCtx.moveTo(0,  CY + dy);
+      else          vCtx.lineTo(px, CY + dy);
+    }
+
+    // String glow: opacity follows amplitude
+    const alpha = 0.6 + 0.4 * decay;
+    vCtx.strokeStyle    = `rgba(232, 216, 176, ${alpha})`;
+    vCtx.lineWidth      = sw;
+    vCtx.lineCap        = 'round';
+    vCtx.shadowColor    = `rgba(240, 220, 160, ${alpha * 0.55})`;
+    vCtx.shadowBlur     = sw * 3.5;
+    vCtx.stroke();
+    vCtx.shadowBlur     = 0;
+
+    const raf = requestAnimationFrame(frame);
+    activeVibrations.set(stringIdx, raf);
+  }
+
+  const raf = requestAnimationFrame(frame);
+  activeVibrations.set(stringIdx, raf);
+}
+
+/** Stop all running vibration animations (e.g. on resize) */
+function stopAllVibrations() {
+  activeVibrations.forEach(raf => cancelAnimationFrame(raf));
+  activeVibrations.clear();
+  document.querySelectorAll('.string-vibe-canvas').forEach(c => {
+    c.style.display = 'none';
+  });
+  document.querySelectorAll('.string-line').forEach(l => {
+    l.style.opacity = '1';
+  });
 }
 
 // ═══════════════════════════════════════════════════════
@@ -286,14 +470,13 @@ function drawMeter(angleDeg) {
 
   mCtx.clearRect(0, 0, W, H);
 
-  // ── Pivot point: bottom-centre of canvas minus 35px (indicator half-height)
-  //    so the needle visually emerges from the indicator light centre ──
+  // ── Pivot: bottom-centre aligned with the 76px indicator light centre ──
   const cx  = W / 2;
-  const cy  = H - 35;                               // aligns with #indicator-light centre
-  const R   = Math.min(W * 0.47, cy - 8);           // radius: just fits in canvas height
+  const cy  = H - 38;                               // half of 76px indicator
+  const R   = Math.min(W * 0.50, cy - 6);           // use more of the canvas width
 
-  const startA = Math.PI * 1.15;   // ~207° (left end of scale)
-  const endA   = Math.PI * 1.85;   // ~333° (right end of scale)
+  const startA = Math.PI * 1.05;   // ~189° — wide left edge
+  const endA   = Math.PI * 1.95;   // ~351° — wide right edge  (162° total sweep)
   const span   = endA - startA;
 
   // ── Cream dial face (pie slice) ──────────────────────
@@ -560,7 +743,25 @@ async function startTuner() {
 // ═══════════════════════════════════════════════════════
 //  MAIN ANIMATION / DETECTION LOOP
 // ═══════════════════════════════════════════════════════
-const SMOOTH = 0.22;
+
+// Cents smoothing factor: smaller = slower/smoother needle
+const SMOOTH = 0.07;
+
+/** Return the most-voted {note,octave} from noteHistory, or null */
+function getStableNote() {
+  if (noteHistory.length < 4) return null;
+  const votes = {};
+  noteHistory.forEach(h => {
+    const key = `${h.note}|${h.octave}`;
+    votes[key] = (votes[key] || 0) + 1;
+  });
+  const [topKey, topCount] = Object.entries(votes)
+    .sort((a, b) => b[1] - a[1])[0];
+  // Require at least 55% consensus before committing
+  if (topCount / noteHistory.length < 0.55) return null;
+  const [note, octStr] = topKey.split('|');
+  return { note, octave: parseInt(octStr) };
+}
 
 function loop() {
   if (!isRunning) return;
@@ -575,35 +776,49 @@ function loop() {
     const detected = freqToNote(freq);
 
     if (detected) {
-      let { note, cents } = detected;
+      let { note, octave, cents } = detected;
 
       if (lockedString !== null) {
-        // Compute cents relative to the locked string
-        const target      = GUITAR_STRINGS[lockedString];
-        const tMidi       = 12 * Math.log2(target.freq / A4_FREQ) + A4_MIDI;
-        const dMidi       = 12 * Math.log2(detected.freq / A4_FREQ) + A4_MIDI;
-        cents             = Math.max(-50, Math.min(50, (dMidi - tMidi) * 100));
-        note              = target.note.replace(/\d/, '');
+        // Compute cents relative to the locked string's exact frequency
+        const target  = GUITAR_STRINGS[lockedString];
+        const tMidi   = 12 * Math.log2(target.freq / A4_FREQ) + A4_MIDI;
+        const dMidi   = 12 * Math.log2(detected.freq / A4_FREQ) + A4_MIDI;
+        cents         = Math.max(-50, Math.min(50, (dMidi - tMidi) * 100));
+        note          = target.note.replace(/\d/, '');
+        octave        = target.octave;
       }
 
+      // Push into history buffer for stability voting
+      noteHistory.push({ note, octave });
+      if (noteHistory.length > NOTE_HIST_SIZE) noteHistory.shift();
+
+      // Smooth the cents deviation continuously
       displayCents = displayCents + SMOOTH * (cents - displayCents);
-      displayNote  = note;
       targetAngle  = Math.max(-50, Math.min(50, displayCents));
+
+      // Only commit a new note when history votes agree
+      const stable = getStableNote();
+      if (stable) {
+        displayNote   = stable.note;
+        displayOctave = stable.octave;
+      }
     } else {
-      displayCents *= 0.94;
-      targetAngle   = displayCents;
+      // Silence → drift back towards 0
+      displayCents  *= 0.92;
+      targetAngle    = displayCents;
+      noteHistory    = [];   // reset history on silence
     }
   }
 
-  // ── Needle interpolation ──
-  needleAngle += (targetAngle - needleAngle) * 0.12;
+  // ── Needle — very smooth interpolation (0.05 = slow) ──
+  needleAngle += (targetAngle - needleAngle) * 0.05;
 
   // ── Redraw meter ──
   mCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
   drawMeter(needleAngle);
 
-  // ── Update wheel (only when note is active) ──
-  if (isRunning) updateNoteWheel(displayNote || 'E', displayCents);
+  // ── Update wheel & circle ──
+  if (isRunning) updateNoteWheel(displayNote || 'E', displayCents, displayOctave);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -613,10 +828,148 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
+
+    // Nav-settings button also opens the modal
+    if (btn.id === 'nav-settings') openSettingsModal();
   });
+});
+
+// ═══════════════════════════════════════════════════════
+//  SETTINGS MODAL
+// ═══════════════════════════════════════════════════════
+const settingsOverlay = document.getElementById('settings-overlay');
+const wakeLockToggle  = document.getElementById('wake-lock-toggle');
+const wakeLockStatus  = document.getElementById('wake-lock-status');
+const wakeLockIcon    = document.getElementById('wake-lock-icon');
+const wakeLockText    = document.getElementById('wake-lock-text');
+
+function openSettingsModal() {
+  settingsOverlay.classList.remove('modal-hidden');
+}
+
+function closeSettingsModal() {
+  settingsOverlay.classList.add('modal-hidden');
+}
+
+// Open via ⚙ button in the note-wheel section
+document.getElementById('settings-btn').addEventListener('click', openSettingsModal);
+
+// Close via ✕ button
+document.getElementById('settings-close').addEventListener('click', closeSettingsModal);
+
+// Close when clicking the dark backdrop (outside the modal card)
+settingsOverlay.addEventListener('click', e => {
+  if (e.target === settingsOverlay) closeSettingsModal();
+});
+
+// Close on Escape key
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeSettingsModal();
+});
+
+// ═══════════════════════════════════════════════════════
+//  WAKE LOCK  (Screen Wake Lock API)
+// ═══════════════════════════════════════════════════════
+let wakeLockSentinel = null;    // holds the active WakeLockSentinel
+const WAKE_LOCK_SUPPORTED = ('wakeLock' in navigator);
+
+/** Update the status badge inside the modal */
+function updateWakeLockBadge(state) {
+  // state: 'on' | 'off' | 'unsupported'
+  wakeLockStatus.className = `status-${state}`;
+
+  if (state === 'on') {
+    wakeLockIcon.textContent = '🟢';
+    wakeLockText.textContent = 'Pantalla siempre encendida activa';
+  } else if (state === 'off') {
+    wakeLockIcon.textContent = '🔴';
+    wakeLockText.textContent = 'La pantalla puede apagarse';
+  } else {
+    wakeLockIcon.textContent = '⚠️';
+    wakeLockText.textContent = 'Wake Lock no soportado en este navegador';
+  }
+}
+
+/** Request the wake lock */
+async function acquireWakeLock() {
+  if (!WAKE_LOCK_SUPPORTED) {
+    updateWakeLockBadge('unsupported');
+    wakeLockToggle.checked = false;
+    return;
+  }
+  try {
+    wakeLockSentinel = await navigator.wakeLock.request('screen');
+
+    // If the OS releases it (e.g., tab goes to background), update UI
+    wakeLockSentinel.addEventListener('release', () => {
+      wakeLockSentinel = null;
+      if (wakeLockToggle.checked) {
+        // Tab is visible again — try to re-acquire
+        if (!document.hidden) acquireWakeLock();
+      } else {
+        updateWakeLockBadge('off');
+      }
+    });
+
+    updateWakeLockBadge('on');
+  } catch (err) {
+    console.warn('Wake Lock request failed:', err.message);
+    wakeLockToggle.checked = false;
+    updateWakeLockBadge('off');
+  }
+}
+
+/** Release the wake lock */
+async function releaseWakeLock() {
+  if (wakeLockSentinel) {
+    await wakeLockSentinel.release();
+    wakeLockSentinel = null;
+  }
+  updateWakeLockBadge('off');
+}
+
+// Wire toggle switch
+wakeLockToggle.addEventListener('change', () => {
+  if (wakeLockToggle.checked) {
+    acquireWakeLock();
+  } else {
+    releaseWakeLock();
+  }
+});
+
+// Re-acquire when the tab becomes visible again (browser releases it on hide)
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && wakeLockToggle.checked && !wakeLockSentinel) {
+    acquireWakeLock();
+  }
+});
+
+// Set initial badge state
+if (!WAKE_LOCK_SUPPORTED) {
+  updateWakeLockBadge('unsupported');
+  wakeLockToggle.disabled = true;
+} else {
+  updateWakeLockBadge('off');
+}
+
+// ═══════════════════════════════════════════════════════
+//  STRING VIBRATION SETTING
+// ═══════════════════════════════════════════════════════
+const vibrationToggle = document.getElementById('vibration-toggle');
+
+vibrationToggle.addEventListener('change', () => {
+  vibrationEnabled = vibrationToggle.checked;
+  if (!vibrationEnabled) {
+    // Stop any currently running vibrations immediately
+    stopAllVibrations();
+  }
 });
 
 // ═══════════════════════════════════════════════════════
 //  START
 // ═══════════════════════════════════════════════════════
+
+// Stop vibrations on resize to avoid stale canvas dimensions
+window.addEventListener('resize', stopAllVibrations);
+
 window.addEventListener('DOMContentLoaded', init);

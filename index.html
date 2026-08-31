@@ -16,8 +16,12 @@
       <div id="meter-container">
         <div id="meter-bg">
           <canvas id="meter-canvas"></canvas>
-          <!-- Red indicator light -->
-          <div id="indicator-light" class="light-red"></div>
+          <!-- Indicator light — shows note + colour -->
+          <div id="indicator-light" class="light-red">
+            <div id="note-in-circle">
+              <span id="nic-note">—</span><span id="nic-oct"></span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -60,6 +64,56 @@
       <button class="nav-btn" id="nav-fav" title="Favoritos">♥</button>
       <button class="nav-btn" id="nav-learn" title="Aprender">🎓</button>
     </nav>
+
+    <!-- ══════════════ SETTINGS MODAL ══════════════ -->
+    <div id="settings-overlay" class="modal-hidden" aria-modal="true" role="dialog">
+      <div id="settings-modal">
+
+        <div id="settings-header">
+          <span id="settings-title">⚙ Ajustes</span>
+          <button id="settings-close" title="Cerrar">✕</button>
+        </div>
+
+        <div id="settings-body">
+
+          <!-- Keep screen on -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Pantalla siempre encendida</span>
+              <span class="setting-desc">Evita que la pantalla se apague mientras afinas</span>
+            </div>
+            <label class="toggle-switch" title="Activar / desactivar">
+              <input type="checkbox" id="wake-lock-toggle" />
+              <span class="toggle-track">
+                <span class="toggle-thumb"></span>
+              </span>
+            </label>
+          </div>
+
+          <!-- String vibration -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Vibración de cuerdas</span>
+              <span class="setting-desc">Animación de onda estacionaria al tocar una cuerda</span>
+            </div>
+            <label class="toggle-switch" title="Activar / desactivar vibración visual">
+              <input type="checkbox" id="vibration-toggle" checked />
+              <span class="toggle-track">
+                <span class="toggle-thumb"></span>
+              </span>
+            </label>
+          </div>
+
+          <!-- Status badge -->
+          <div id="wake-lock-status" class="status-off">
+            <span id="wake-lock-icon">🔴</span>
+            <span id="wake-lock-text">La pantalla puede apagarse</span>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
 
   </div>
 

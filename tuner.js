@@ -487,30 +487,50 @@ function drawMeter(angleDeg) {
   // ── Pivot: aligned with the 82px indicator light centre (bottom: 26px + 41px = 67px from bottom) ──
   const cx  = W / 2;
   const cy  = H - 67;
-  const R   = Math.min(W * 0.49, cy - 8);
+  const R   = Math.min(W * 0.46, cy - 8);
 
-  const startA = Math.PI * 1.05;   // ~189° — wide left edge
-  const endA   = Math.PI * 1.95;   // ~351° — wide right edge
-  const span   = endA - startA;
+  // ── EXACT SEMICIRCLE: from 180° (Math.PI) to 360° (2*Math.PI) ──
+  const startA = Math.PI * 1.0;   // 180° (horizontal left base)
+  const endA   = Math.PI * 2.0;   // 360° / 0° (horizontal right base)
+  const span   = Math.PI;         // 180° sweep
 
-  // ── Cream dial face ──────────────────────
+  // ── Cream dial face (Semicircle with flat horizontal bottom) ──
   mCtx.beginPath();
-  mCtx.moveTo(cx, cy);
-  mCtx.arc(cx, cy, R * 1.01, startA, endA);
+  mCtx.moveTo(cx - R, cy);
+  mCtx.arc(cx, cy, R, startA, endA, false);
+  mCtx.lineTo(cx + R, cy);
   mCtx.closePath();
+
   const grad = mCtx.createRadialGradient(cx, cy - R * 0.35, R * 0.05, cx, cy, R);
-  grad.addColorStop(0,    '#fbf1db');
-  grad.addColorStop(0.6,  '#f0e0be');
-  grad.addColorStop(1,    '#cfbb91');
+  grad.addColorStop(0,    '#fcf4e0');
+  grad.addColorStop(0.55, '#f4e5c3');
+  grad.addColorStop(1,    '#ceb88a');
   mCtx.fillStyle = grad;
   mCtx.fill();
 
-  // Outer border arc
+  // Outer border arc & flat bottom base
   mCtx.beginPath();
   mCtx.arc(cx, cy, R, startA, endA);
   mCtx.strokeStyle = '#8a7050';
   mCtx.lineWidth   = 2.5;
   mCtx.stroke();
+
+  mCtx.beginPath();
+  mCtx.moveTo(cx - R, cy);
+  mCtx.lineTo(cx + R, cy);
+  mCtx.strokeStyle = '#8a7050';
+  mCtx.lineWidth   = 1.5;
+  mCtx.stroke();
+
+  // ── Green central tuning sector / wedge (±5 cents, translucent) ──
+  const zH = (IN_TUNE_CENTS / 100) * span;
+  const cA  = startA + 0.5 * span; // 1.5 * Math.PI (top vertical 270°)
+  mCtx.beginPath();
+  mCtx.moveTo(cx, cy);
+  mCtx.arc(cx, cy, R * 0.96, cA - zH, cA + zH);
+  mCtx.closePath();
+  mCtx.fillStyle = 'rgba(70, 180, 70, 0.22)';
+  mCtx.fill();
 
   // ── Scale ticks & labels ─────────────────────────────
   for (let v = -50; v <= 50; v += 5) {
@@ -520,20 +540,20 @@ function drawMeter(angleDeg) {
     const cos   = Math.cos(angle);
     const sin   = Math.sin(angle);
 
-    const r1 = R * (major ? 0.79 : 0.86);
-    const r2 = R * 0.93;
+    const r1 = R * (major ? 0.78 : 0.86);
+    const r2 = R * 0.94;
 
     mCtx.beginPath();
     mCtx.moveTo(cx + cos * r1, cy + sin * r1);
     mCtx.lineTo(cx + cos * r2, cy + sin * r2);
-    mCtx.strokeStyle = major ? '#444' : '#888';
-    mCtx.lineWidth   = major ? 2 : 1;
+    mCtx.strokeStyle = major ? '#382e22' : '#8c7d6b';
+    mCtx.lineWidth   = major ? 2.2 : 1.2;
     mCtx.stroke();
 
     if (major) {
-      const rL  = R * 0.70;
+      const rL  = R * 0.67;
       const txt = v === 0 ? '0' : (v > 0 ? `+${v}` : `${v}`);
-      mCtx.font         = `bold ${Math.max(10, Math.round(R * 0.05))}px Arial`;
+      mCtx.font         = `bold ${Math.max(10, Math.round(R * 0.055))}px Arial`;
       mCtx.fillStyle    = '#2e261e';
       mCtx.textAlign    = 'center';
       mCtx.textBaseline = 'middle';
@@ -542,41 +562,31 @@ function drawMeter(angleDeg) {
   }
 
   // "cent" label (bottom-left)
-  mCtx.font         = `italic ${Math.max(9, Math.round(R * 0.044))}px Georgia`;
+  mCtx.font         = `italic ${Math.max(9, Math.round(R * 0.046))}px Georgia`;
   mCtx.fillStyle    = '#6b5842';
   mCtx.textAlign    = 'left';
   mCtx.textBaseline = 'alphabetic';
-  mCtx.fillText('cent', cx - R * 0.88, cy - R * 0.04);
+  mCtx.fillText('cent', cx - R * 0.88, cy + 18);
 
   // Watermark text
   mCtx.save();
   mCtx.font      = `italic bold ${Math.round(R * 0.075)}px Georgia`;
-  mCtx.fillStyle = 'rgba(120,80,40,0.14)';
+  mCtx.fillStyle = 'rgba(120,80,40,0.12)';
   mCtx.textAlign = 'center';
   mCtx.textBaseline = 'middle';
   mCtx.translate(cx, cy - R * 0.44);
-  mCtx.rotate(-0.12);
+  mCtx.rotate(-0.08);
   mCtx.fillText('Afinador Pro', 0, 0);
   mCtx.restore();
 
-  // Green centre zone highlight (in tune range ±5 cents)
-  const zH = (IN_TUNE_CENTS / 100) * span;
-  const cA  = startA + 0.5 * span;
-  mCtx.beginPath();
-  mCtx.moveTo(cx, cy);
-  mCtx.arc(cx, cy, R * 0.94, cA - zH, cA + zH);
-  mCtx.closePath();
-  mCtx.fillStyle = 'rgba(40, 180, 70, 0.16)';
-  mCtx.fill();
-
   // ── Needle ───────────────────────────────────────────
   const nAngle = startA + ((angleDeg + 50) / 100) * span;
-  const nLen   = R * 0.92;
+  const nLen   = R * 0.94;
   const nCos   = Math.cos(nAngle);
   const nSin   = Math.sin(nAngle);
 
   mCtx.save();
-  mCtx.shadowColor   = 'rgba(0,0,0,0.35)';
+  mCtx.shadowColor   = 'rgba(0,0,0,0.4)';
   mCtx.shadowBlur    = 5;
   mCtx.shadowOffsetX = 2;
   mCtx.shadowOffsetY = 2;
@@ -584,13 +594,13 @@ function drawMeter(angleDeg) {
   mCtx.beginPath();
   mCtx.moveTo(cx, cy);
   mCtx.lineTo(cx + nCos * nLen, cy + nSin * nLen);
-  mCtx.strokeStyle = '#1a1010';
+  mCtx.strokeStyle = '#140c0c';
   mCtx.lineWidth   = 2.6;
   mCtx.lineCap     = 'round';
   mCtx.stroke();
   mCtx.restore();
 
-  // Pivot dot (drawn on top)
+  // Pivot dot
   mCtx.beginPath();
   mCtx.arc(cx, cy, 6.5, 0, Math.PI * 2);
   const pivGrad = mCtx.createRadialGradient(cx - 2, cy - 2, 1, cx, cy, 6.5);

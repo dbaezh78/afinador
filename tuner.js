@@ -167,16 +167,18 @@ function updateNoteWheel(note, cents, octave = 4, frequency = null) {
     if (nicOct)  nicOct.textContent  = octave;
   }
 
-  // Update frequency (Hz / exact tuning pitch) readout below circle
+  // Update frequency (Hz / exact tuning pitch) readout below circle: format as XXX.X (e.g. 440.0 or 082.4)
   if (freqValEl) {
-    if (frequency && frequency > 0) {
-      freqValEl.textContent = frequency.toFixed(1);
+    let hz = 0;
+    if (frequency && frequency > 0 && frequency < 2000) {
+      hz = frequency;
     } else if (NOTE_FREQS[note]) {
-      // Calculate octave adjusted frequency based on standard table
-      const baseFreq = NOTE_FREQS[note]; // 4th octave (e.g. A4=440)
-      const octOffset = octave - 4;
-      const targetHz = baseFreq * Math.pow(2, octOffset);
-      freqValEl.textContent = targetHz.toFixed(1);
+      const baseFreq = NOTE_FREQS[note];
+      const octOffset = (octave >= 1 && octave <= 7 ? octave : 4) - 4;
+      hz = baseFreq * Math.pow(2, octOffset);
+    }
+    if (hz > 0) {
+      freqValEl.textContent = hz.toFixed(1);
     }
   }
 
@@ -624,7 +626,7 @@ function drawFretboardBg() {
   fCtx.clearRect(0, 0, W, H);
 
   const pegW     = 72;          // must match .string-peg width
-  const numFrets = 5;
+  const numFrets = 2.5;         // exactly 2 frets and a half visible
   const fretW    = (W - pegW) / numFrets;
 
   // ── Peg column background ──
@@ -650,8 +652,8 @@ function drawFretboardBg() {
     fCtx.stroke();
   }
 
-  // ── Fret lines — ivory/silver, NO red ──
-  for (let f = 0; f <= numFrets; f++) {
+  // ── Fret lines — Nut (0), Fret 1, Fret 2 ──
+  for (let f = 0; f <= 2; f++) {
     const x = pegW + f * fretW;
 
     if (f === 0) {
@@ -663,26 +665,26 @@ function drawFretboardBg() {
       fCtx.fillStyle = nutGrad;
       fCtx.fillRect(x - 4, 0, 7, H);
     } else {
-      // Regular fret: thin silver/ivory line
+      // Regular fret: silver/ivory line
       const fGrad = fCtx.createLinearGradient(x - 1, 0, x + 2, 0);
       fGrad.addColorStop(0,   'rgba(160,145,110,0.6)');
       fGrad.addColorStop(0.5, 'rgba(220,205,165,0.85)');
       fGrad.addColorStop(1,   'rgba(140,125,90,0.5)');
       fCtx.fillStyle = fGrad;
-      fCtx.fillRect(x - 1, 0, 2.5, H);
+      fCtx.fillRect(x - 1, 0, 3, H);
     }
   }
 
-  // ── Fret position inlay dots (3rd and 5th fret positions) ──
-  [2, 4].forEach(f => {
+  // ── Inlay position dots (centered in fret 1 and fret 2) ──
+  [1, 2].forEach(f => {
     const x = pegW + (f - 0.5) * fretW;
     const y = H / 2;
 
     fCtx.beginPath();
-    fCtx.arc(x, y, 7, 0, Math.PI * 2);
-    fCtx.fillStyle = 'rgba(210,190,140,0.15)';
+    fCtx.arc(x, y, 7.5, 0, Math.PI * 2);
+    fCtx.fillStyle = 'rgba(210,190,140,0.18)';
     fCtx.fill();
-    fCtx.strokeStyle = 'rgba(210,190,140,0.3)';
+    fCtx.strokeStyle = 'rgba(210,190,140,0.35)';
     fCtx.lineWidth = 1;
     fCtx.stroke();
   });
@@ -699,9 +701,9 @@ function detectPitch(buf, sampleRate) {
   let rms = 0;
   for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
   rms = Math.sqrt(rms / SIZE);
-  if (rms < 0.008) return null;
+  if (rms < 0.005) return null; // Sensitive enough for soft low E2 plucks
 
-  // Autocorrelation
+  // Autocorrelation calculation
   const corr = new Float32Array(HALF);
   for (let lag = 0; lag < HALF; lag++) {
     let s = 0;
@@ -709,14 +711,30 @@ function detectPitch(buf, sampleRate) {
     corr[lag] = s;
   }
 
-  // Find first trough then highest peak
+  // Find first trough (skip zero lag peak)
   let d = 1;
   while (d < HALF && corr[d] > corr[d - 1]) d++;
+
+  // Find all significant peaks
+  // Guitar low E2 (82.4 Hz) at 44.1kHz has period ~535 samples, at 48kHz ~582 samples.
   let maxV = -Infinity, maxP = -1;
   for (let i = d; i < HALF; i++) {
-    if (corr[i] > maxV) { maxV = corr[i]; maxP = i; }
+    if (corr[i] > maxV) {
+      maxV = corr[i];
+      maxP = i;
+    }
   }
-  if (maxP === -1 || maxV / corr[0] < MIN_CONF) return null;
+
+  if (maxP === -1 || maxV / corr[0] < 0.78) return null; // threshold suited for acoustic guitars
+
+  // Sub-harmonic check (prevents octave-jumping on low strings like E2 & A2)
+  for (let sub = 2; sub <= 4; sub++) {
+    const subP = Math.round(maxP / sub);
+    if (subP > d && corr[subP] > 0.85 * maxV) {
+      maxP = subP;
+      break;
+    }
+  }
 
   // Parabolic interpolation for sub-sample accuracy
   const y1  = corr[maxP - 1] ?? corr[maxP];
@@ -724,17 +742,25 @@ function detectPitch(buf, sampleRate) {
   const y3  = corr[maxP + 1] ?? corr[maxP];
   const denom = 2 * (2 * y2 - y1 - y3);
   const shift = denom !== 0 ? (y3 - y1) / denom : 0;
-  return sampleRate / (maxP + shift);
+  const detectedHz = sampleRate / (maxP + shift);
+
+  // Valid guitar frequency range filter: 65 Hz (below drop D) to 1200 Hz
+  if (detectedHz < 65 || detectedHz > 1500) return null;
+
+  return detectedHz;
 }
 
 // ── Freq → note ──────────────────────────────────────
 function freqToNote(freq) {
-  if (!freq || freq <= 0) return null;
+  if (!freq || freq <= 0 || isNaN(freq)) return null;
   const midiF   = 12 * Math.log2(freq / A4_FREQ) + A4_MIDI;
   const midiR   = Math.round(midiF);
   const cents   = (midiF - midiR) * 100;
   const noteIdx = ((midiR % 12) + 12) % 12;
   const octave  = Math.floor(midiR / 12) - 1;
+
+  if (octave < 1 || octave > 8) return null; // sanitize extreme octaves
+
   return { note: NOTES[noteIdx], octave, cents, freq };
 }
 
@@ -748,11 +774,18 @@ async function startTuner() {
   try {
     ensureAudioCtx();
     analyser = audioCtx.createAnalyser();
-    analyser.fftSize = FFT_SIZE;
-    analyser.smoothingTimeConstant = 0.3;
+    analyser.fftSize = FFT_SIZE; // 4096 gives ~10.7 Hz bin resolution at 44.1kHz, perfect for 82.4Hz E2
+    analyser.smoothingTimeConstant = 0.2;
 
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    sourceNode   = audioCtx.createMediaStreamSource(stream);
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false
+      },
+      video: false
+    });
+    sourceNode = audioCtx.createMediaStreamSource(stream);
     sourceNode.connect(analyser);
 
     timeDomainBuf = new Float32Array(analyser.fftSize);

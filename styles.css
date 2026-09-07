@@ -342,11 +342,14 @@ html, body {
   height: 40px;
   position: relative;
   cursor: pointer;
+  border-radius: 20px 0 0 20px;
   transition: background var(--transition);
 }
 
 .string-row:active { background: rgba(200,169,90,0.12); }
-.string-row.active { background: rgba(200,169,90,0.08); }
+.string-row.active { background: rgba(200,169,90,0.15); }
+.string-row.detected { background: rgba(200,50,50,0.22); }
+.string-row.detected-in-tune { background: rgba(40,180,70,0.25); }
 
 /* Peg button */
 .string-peg {
@@ -366,7 +369,23 @@ html, body {
   user-select: none;
   flex-shrink: 0;
   z-index: 3;
+  transition: all 0.2s ease;
 }
+
+.string-row.detected .string-peg {
+  background: radial-gradient(ellipse at 40% 35%, #ff8888, #cc2222 50%, #881111);
+  border-color: #ff4444;
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(255, 60, 60, 0.7), inset 0 1px 2px rgba(255,255,255,0.4);
+}
+
+.string-row.detected-in-tune .string-peg {
+  background: radial-gradient(ellipse at 40% 35%, #aaffaa, #22bb44 50%, #117722);
+  border-color: #44ff66;
+  color: #ffffff;
+  box-shadow: 0 0 14px rgba(60, 255, 100, 0.8), inset 0 1px 2px rgba(255,255,255,0.4);
+}
+
 .string-peg .note-name { font-size: 14px; }
 .string-peg .octave    { font-size: 10px; vertical-align: sub; }
 

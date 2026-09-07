@@ -138,19 +138,49 @@ const nicNote   = document.getElementById('nic-note');
 const nicOct    = document.getElementById('nic-oct');
 const freqValEl = document.getElementById('freq-val');
 
+function highlightDetectedString(note, octave, cents) {
+  const rows = document.querySelectorAll('.string-row');
+  let matchedIdx = -1;
+
+  // Match with guitar strings
+  GUITAR_STRINGS.forEach((str, idx) => {
+    const sNote = str.note.replace(/\d/, '');
+    if (sNote === note && (octave === undefined || Math.abs(str.octave - octave) <= 1)) {
+      matchedIdx = idx;
+    }
+  });
+
+  rows.forEach(r => {
+    const idx = parseInt(r.dataset.idx);
+    r.classList.remove('detected', 'detected-in-tune');
+    if (idx === matchedIdx) {
+      if (Math.abs(cents) <= IN_TUNE_CENTS) {
+        r.classList.add('detected-in-tune');
+      } else {
+        r.classList.add('detected');
+      }
+    }
+  });
+
+  return matchedIdx;
+}
+
+let lastVibratedIdx = -1;
+let lastVibratedTime = 0;
+
 function updateNoteWheel(note, cents, octave = 4, frequency = null) {
   const baseIdx = NOTES.indexOf(note);
   if (baseIdx === -1) return;
 
-  // Always scroll to the middle copy (offset 12)
-  const targetIdx = 12 + baseIdx;
+  // Continuous wheel position: baseIdx in the middle copy (offset 12) + sub-note offset from cents
+  const continuousIdx = 12 + baseIdx + (cents / 100);
 
   const wheelW     = noteWheelEl.offsetWidth;
-  const translateX = wheelW / 2 - (targetIdx + 0.5) * CELL_W;
+  const translateX = wheelW / 2 - (continuousIdx + 0.5) * CELL_W;
 
-  noteTrackEl.style.transform = `translateX(${Math.round(translateX)}px)`;
+  noteTrackEl.style.transform = `translateX(${translateX.toFixed(1)}px)`;
 
-  // Update cell classes only when note actually changes
+  const targetIdx = 12 + baseIdx;
   if (targetIdx !== lastNoteIdx) {
     lastNoteIdx = targetIdx;
     const cells = noteTrackEl.querySelectorAll('.note-cell');
@@ -161,13 +191,28 @@ function updateNoteWheel(note, cents, octave = 4, frequency = null) {
       else if (dist === 1) cell.classList.add('near-1');
       else if (dist === 2) cell.classList.add('near-2');
     });
-
-    // Update LCD display inside the indicator circle
-    if (nicNote) nicNote.textContent = note;
-    if (nicOct)  nicOct.textContent  = octave;
   }
 
-  // Update frequency (Hz / exact tuning pitch) readout below circle: format as XXX.X (e.g. 440.0 or 082.4)
+  // Update LCD display inside the indicator circle
+  if (nicNote) nicNote.textContent = note;
+  if (nicOct)  nicOct.textContent  = octave;
+
+  // Highlight and trigger vibration on the matched guitar string
+  const matchedIdx = highlightDetectedString(note, octave, cents);
+  if (matchedIdx !== -1) {
+    const now = performance.now();
+    // If not vibrated recently (debounce 1.5s), trigger string wave vibration
+    if (matchedIdx !== lastVibratedIdx || now - lastVibratedTime > 1600) {
+      const targetRow = document.querySelector(`.string-row[data-idx="${matchedIdx}"]`);
+      if (targetRow) {
+        startStringVibration(matchedIdx, targetRow);
+        lastVibratedIdx = matchedIdx;
+        lastVibratedTime = now;
+      }
+    }
+  }
+
+  // Update frequency (Hz / exact tuning pitch) readout below circle: format as XXX.X (e.g. 82.4 or 440.0)
   if (freqValEl) {
     let hz = 0;
     if (frequency && frequency > 0 && frequency < 2000) {
@@ -801,12 +846,12 @@ async function startTuner() {
 //  MAIN ANIMATION / DETECTION LOOP
 // ═══════════════════════════════════════════════════════
 
-// Cents smoothing factor: smaller = slower/smoother needle
-const SMOOTH = 0.07;
+// Cents smoothing factor: fast enough to follow pitch changes, smooth enough to avoid jitter
+const SMOOTH = 0.16;
 
 /** Return the most-voted {note,octave} from noteHistory, or null */
 function getStableNote() {
-  if (noteHistory.length < 4) return null;
+  if (noteHistory.length < 2) return null;
   const votes = {};
   noteHistory.forEach(h => {
     const key = `${h.note}|${h.octave}`;
@@ -814,8 +859,8 @@ function getStableNote() {
   });
   const [topKey, topCount] = Object.entries(votes)
     .sort((a, b) => b[1] - a[1])[0];
-  // Require at least 55% consensus before committing
-  if (topCount / noteHistory.length < 0.55) return null;
+  // Require 40% consensus for prompt note switching
+  if (topCount / noteHistory.length < 0.40) return null;
   const [note, octStr] = topKey.split('|');
   return { note, octave: parseInt(octStr) };
 }
@@ -850,7 +895,7 @@ function loop() {
 
       // Push into history buffer for stability voting
       noteHistory.push({ note, octave });
-      if (noteHistory.length > NOTE_HIST_SIZE) noteHistory.shift();
+      if (noteHistory.length > 8) noteHistory.shift();
 
       // Smooth the cents deviation continuously
       displayCents = displayCents + SMOOTH * (cents - displayCents);
@@ -864,15 +909,15 @@ function loop() {
         displayOctave = stable.octave;
       }
     } else {
-      // Silence → drift back towards 0
-      displayCents  *= 0.92;
+      // Silence → drift back towards 0 smoothly
+      displayCents  *= 0.90;
       targetAngle    = displayCents;
-      noteHistory    = [];   // reset history on silence
+      if (noteHistory.length > 0) noteHistory.shift();
     }
   }
 
-  // ── Needle — very smooth interpolation (0.05 = slow) ──
-  needleAngle += (targetAngle - needleAngle) * 0.05;
+  // ── Needle — responsive and fluid interpolation ──
+  needleAngle += (targetAngle - needleAngle) * 0.14;
 
   // ── Redraw meter ──
   mCtx.setTransform(dpr, 0, 0, dpr, 0, 0);

@@ -833,9 +833,9 @@ function numberToNoteName(number) {
   return NOTES[idx];
 }
 
-// ═══════════════════════════════════════════════════════
-//  PITCH DETECTION — gtuner pure autocorrelation
-// ═══════════════════════════════════════════════════════
+// Noise reduction level (0 = all audio enters, 100 = maximum noise filtering)
+let noiseReductionLevel = 30;
+
 function detectPitch(buf, sampleRate) {
   const size = buf.length;
   let rms = 0;
@@ -846,8 +846,9 @@ function detectPitch(buf, sampleRate) {
   }
   rms = Math.sqrt(rms / size);
 
-  // gtuner noise gate threshold (with acoustic fallback for softer plucks on thin string 1)
-  if (rms < 0.010) {
+  // Noise gate threshold mapped from noiseReductionLevel (0 -> 0.003, 100 -> 0.065)
+  const baseNoiseThreshold = 0.003 + (noiseReductionLevel / 100) * 0.062;
+  if (rms < baseNoiseThreshold) {
     return null;
   }
 
@@ -1012,11 +1013,17 @@ function loop() {
         holdFramesAfterPluck = 25; // Lock onto the string fundamental across its decay
       }
 
-      // Dynamic gate: require sound to be near the plucked string energy rather than distant faint sounds
-      // If a strong pluck recently occurred, reject faint background noise (< 15% of peak)
-      const dynamicGate = Math.max(0.010, peakRms * 0.18);
+      // Dynamic gate mapped with noiseReductionLevel:
+      // When noiseReductionLevel = 0, threshold is low (0.003, minimal pluck gate)
+      // When noiseReductionLevel = 100, requires much cleaner ratio and higher floor
+      const gateRatio = 0.05 + (noiseReductionLevel / 100) * 0.25;
+      const minGate = 0.003 + (noiseReductionLevel / 100) * 0.05;
+      const dynamicGate = Math.max(minGate, peakRms * gateRatio);
 
-      if (rms >= dynamicGate && confidence >= 0.40) {
+      // Minimum harmonic clarity required (0 -> 0.25, 100 -> 0.65)
+      const minConfidence = 0.25 + (noiseReductionLevel / 100) * 0.40;
+
+      if (rms >= dynamicGate && confidence >= minConfidence) {
         validSignal = true;
         currentConfidence = confidence;
         const detected = freqToNote(freq);
@@ -1259,6 +1266,21 @@ const chimeToggle = document.getElementById('chime-toggle');
 if (chimeToggle) {
   chimeToggle.addEventListener('change', () => {
     isMuted = !chimeToggle.checked;
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+//  NOISE REDUCTION SLIDER SETTING
+// ═══════════════════════════════════════════════════════
+const noiseSlider = document.getElementById('noise-reduction-slider');
+const noiseValEl  = document.getElementById('noise-reduction-val');
+
+if (noiseSlider) {
+  noiseSlider.addEventListener('input', () => {
+    noiseReductionLevel = parseInt(noiseSlider.value, 10) || 0;
+    if (noiseValEl) {
+      noiseValEl.textContent = `${noiseReductionLevel}%`;
+    }
   });
 }
 

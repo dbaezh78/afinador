@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>♫ Afinador de Guitarra</title>
-  <link rel="stylesheet" href="styles.css?v=2.3" />
+  <link rel="stylesheet" href="styles.css?v=2.4" />
 </head>
 <body>
   <div id="app">
@@ -120,6 +120,25 @@
             </label>
           </div>
 
+          <!-- Noise Reduction Slider / Reducción de Ruido -->
+          <div class="setting-row slider-row">
+            <div class="setting-info">
+              <div class="slider-header">
+                <span class="setting-label">Reducción de ruido ambiental</span>
+                <div class="slider-controls-top">
+                  <button id="btn-reset-noise" title="Restablecer valor por defecto (30%)">⟲ Defecto</button>
+                  <span id="noise-reduction-val" class="slider-badge">30%</span>
+                </div>
+              </div>
+              <span class="setting-desc">0 = entra todo el sonido | 100 = reduce todo el ruido ambiental</span>
+              <div class="slider-container">
+                <span class="slider-min">0</span>
+                <input type="range" id="noise-reduction-slider" min="0" max="100" value="30" step="1" />
+                <span class="slider-max">100</span>
+              </div>
+            </div>
+          </div>
+
           <!-- Status badge -->
           <div id="wake-lock-status" class="status-off">
             <span id="wake-lock-icon">🔴</span>
@@ -133,6 +152,6 @@
 
   </div>
 
-  <script src="tuner.js?v=2.2"></script>
+  <script src="tuner.js?v=2.4"></script>
 </body>
 </html>

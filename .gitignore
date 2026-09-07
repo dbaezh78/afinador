@@ -1,0 +1,24 @@
+﻿# Node / Dependencias
+node_modules/
+package-lock.json
+
+# Compilación Android y temporales
+android/.gradle/
+android/build/
+android/app/build/
+android/.idea/
+android/*.iml
+android/app/*.iml
+android/local.properties
+android/captures/
+android/.externalNativeBuild/
+android/.cxx/
+
+# Gradle wrapper cache
+.gradle/
+build/
+
+# Archivos de depuración y temporales
+*.log
+.DS_Store
+Thumbs.db

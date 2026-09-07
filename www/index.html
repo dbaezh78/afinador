@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>♫ Afinador de Guitarra</title>
+  <link rel="stylesheet" href="styles.css?v=2.4" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- ══════════════ TUNER PANEL ══════════════ -->
+    <div id="tuner-panel">
+
+      <!-- Dial meter -->
+      <div id="meter-container">
+        <div id="meter-bg">
+          <canvas id="meter-canvas"></canvas>
+          <!-- Indicator light — shows note + colour -->
+          <div id="indicator-light" class="light-red">
+            <div id="note-in-circle">
+              <span id="nic-note">—</span><span id="nic-oct"></span>
+            </div>
+          </div>
+          <!-- Exact frequency (Hz) / Decibel reading under the circle -->
+          <div id="freq-display"><span id="freq-val">440.0</span> <span id="freq-unit">Hz</span></div>
+        </div>
+      </div>
+
+      <!-- Note Wheel -->
+      <div id="note-wheel-section">
+        <span id="note-wheel-label">♫ Rueda de notas</span>
+        <div id="note-wheel">
+          <!-- Scrollable note track, built by JS -->
+          <div id="note-track"></div>
+          <!-- Fixed centre highlight box + bottom pointer -->
+          <div id="wheel-center-box"></div>
+          <div id="wheel-marker"></div>
+        </div>
+        <button id="settings-btn" title="Ajustes">⚙</button>
+      </div>
+
+    </div>
+
+    <!-- ══════════════ FRETBOARD PANEL ══════════════ -->
+    <div id="fretboard-panel">
+
+      <!-- Rotated label -->
+      <div id="fretboard-label">
+        <span>Guitarra estándar</span>
+        <span>Afinación Estándar</span>
+      </div>
+
+      <!-- Strings -->
+      <div id="strings-container">
+        <canvas id="fretboard-canvas"></canvas>
+        <div id="strings-list"></div>
+      </div>
+
+    </div>
+
+    <!-- ══════════════ NAV BAR ══════════════ -->
+    <nav id="navbar">
+      <button class="nav-btn active" id="nav-tuner" title="Afinador">♫</button>
+      <button class="nav-btn" id="nav-settings" title="Ajustes">⚙</button>
+      <button class="nav-btn" id="nav-fav" title="Favoritos">♥</button>
+      <button class="nav-btn" id="nav-learn" title="Aprender">🎓</button>
+    </nav>
+
+    <!-- ══════════════ SETTINGS MODAL ══════════════ -->
+    <div id="settings-overlay" class="modal-hidden" aria-modal="true" role="dialog">
+      <div id="settings-modal">
+
+        <div id="settings-header">
+          <span id="settings-title">⚙ Ajustes</span>
+          <button id="settings-close" title="Cerrar">✕</button>
+        </div>
+
+        <div id="settings-body">
+
+          <!-- Keep screen on -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Pantalla siempre encendida</span>
+              <span class="setting-desc">Evita que la pantalla se apague mientras afinas</span>
+            </div>
+            <label class="toggle-switch" title="Activar / desactivar">
+              <input type="checkbox" id="wake-lock-toggle" checked />
+              <span class="toggle-track">
+                <span class="toggle-thumb"></span>
+              </span>
+            </label>
+          </div>
+
+          <!-- String vibration -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Vibración de cuerdas</span>
+              <span class="setting-desc">Animación de onda estacionaria al tocar una cuerda</span>
+            </div>
+            <label class="toggle-switch" title="Activar / desactivar vibración visual">
+              <input type="checkbox" id="vibration-toggle" checked />
+              <span class="toggle-track">
+                <span class="toggle-thumb"></span>
+              </span>
+            </label>
+          </div>
+
+          <!-- Sound Chime / Sonido al afinar -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Sonido al afinar</span>
+              <span class="setting-desc">Toca una campana armónica cuando la nota está en el punto exacto</span>
+            </div>
+            <label class="toggle-switch" title="Activar / desactivar sonido al afinar">
+              <input type="checkbox" id="chime-toggle" checked />
+              <span class="toggle-track">
+                <span class="toggle-thumb"></span>
+              </span>
+            </label>
+          </div>
+
+          <!-- Noise Reduction Slider / Reducción de Ruido -->
+          <div class="setting-row slider-row">
+            <div class="setting-info">
+              <div class="slider-header">
+                <span class="setting-label">Sensibilidad del micrófono</span>
+                <div class="slider-controls-top">
+                  <button id="btn-reset-noise" title="Restablecer valor por defecto (70%)">⟲ Defecto</button>
+                  <span id="noise-reduction-val" class="slider-badge">70%</span>
+                </div>
+              </div>
+              <span class="setting-desc">0 = silencio (micrófono cerrado) | 100 = máxima sensibilidad</span>
+              <div class="slider-container">
+                <span class="slider-min">0</span>
+                <input type="range" id="noise-reduction-slider" min="0" max="100" value="70" step="1" />
+                <span class="slider-max">100</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Status badge -->
+          <div id="wake-lock-status" class="status-off">
+            <span id="wake-lock-icon">🔴</span>
+            <span id="wake-lock-text">La pantalla puede apagarse</span>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <script src="tuner.js?v=2.4"></script>
+</body>
+</html>

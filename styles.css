@@ -648,6 +648,39 @@ html, body {
   width: 100%;
 }
 
+.slider-controls-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#btn-reset-noise {
+  background: rgba(200, 169, 90, 0.14);
+  border: 1px solid rgba(200, 169, 90, 0.35);
+  color: var(--clr-gold);
+  font-size: 11px;
+  font-weight: bold;
+  padding: 3px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  user-select: none;
+}
+
+#btn-reset-noise:hover {
+  background: rgba(200, 169, 90, 0.28);
+  border-color: var(--clr-gold);
+  color: #fff;
+  box-shadow: 0 0 8px rgba(200, 169, 90, 0.35);
+}
+
+#btn-reset-noise:active {
+  transform: scale(0.95);
+}
+
 .slider-badge {
   font-family: 'Courier New', 'Consolas', monospace;
   font-size: 14px;

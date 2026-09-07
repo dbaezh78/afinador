@@ -1272,14 +1272,25 @@ if (chimeToggle) {
 // ═══════════════════════════════════════════════════════
 //  NOISE REDUCTION SLIDER SETTING
 // ═══════════════════════════════════════════════════════
-const noiseSlider = document.getElementById('noise-reduction-slider');
-const noiseValEl  = document.getElementById('noise-reduction-val');
+const noiseSlider   = document.getElementById('noise-reduction-slider');
+const noiseValEl    = document.getElementById('noise-reduction-val');
+const btnResetNoise = document.getElementById('btn-reset-noise');
 
 if (noiseSlider) {
   noiseSlider.addEventListener('input', () => {
     noiseReductionLevel = parseInt(noiseSlider.value, 10) || 0;
     if (noiseValEl) {
       noiseValEl.textContent = `${noiseReductionLevel}%`;
+    }
+  });
+}
+
+if (btnResetNoise && noiseSlider) {
+  btnResetNoise.addEventListener('click', () => {
+    noiseReductionLevel = 30;
+    noiseSlider.value = 30;
+    if (noiseValEl) {
+      noiseValEl.textContent = '30%';
     }
   });
 }

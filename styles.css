@@ -78,11 +78,11 @@ html, body {
 /* Indicator — dark centre for LCD note, coloured ring */
 #indicator-light {
   position: absolute;
-  bottom: 26px;
+  bottom: 23px;
   left: 50%;
   transform: translateX(-50%);
-  width: 82px;
-  height: 82px;
+  width: 96px;
+  height: 96px;
   border-radius: 50%;
   border: 4px solid #550a0a;
   background: radial-gradient(circle at 50% 48%, #110404, #1a0606 55%, #220808);
@@ -91,7 +91,7 @@ html, body {
   justify-content: center;
   z-index: 5;
   pointer-events: none;
-  transition: box-shadow 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
   /* Default off-state colour */
   color: #cc2020;
   box-shadow: 0 0 18px rgba(180,0,0,0.4), 0 0 6px #000,
@@ -101,7 +101,7 @@ html, body {
 /* Frequency / Hz / Decibels readout directly below the circle */
 #freq-display {
   position: absolute;
-  bottom: 3px;
+  bottom: 2px;
   left: 50%;
   transform: translateX(-50%);
   font-family: 'Courier New', 'Consolas', monospace;
@@ -120,22 +120,25 @@ html, body {
   margin-left: 2px;
 }
 
-/* Colour states — only touch glow, border and text colour */
+/* Colour states — vibrant glowing states */
 .light-red {
-  color: #ff3030;
+  color: #ff2a2a;
   border-color: #aa2020;
-  box-shadow: 0 0 22px rgba(220,0,0,0.55), 0 0 6px #000,
-              inset 0 0 16px rgba(160,0,0,0.4);
+  background: radial-gradient(circle at 50% 48%, #160404, #1c0505 55%, #260808) !important;
+  box-shadow: 0 0 24px rgba(220,0,0,0.6), 0 0 6px #000,
+              inset 0 0 18px rgba(160,0,0,0.45);
 }
 .light-green {
-  color: #30ff70;
-  border-color: #20aa60;
-  box-shadow: 0 0 22px rgba(0,210,80,0.55), 0 0 6px #000,
-              inset 0 0 16px rgba(0,160,60,0.3);
+  color: #2bff6e !important;
+  border-color: #1ed760 !important;
+  background: radial-gradient(circle at 50% 48%, #031c08, #05260c 55%, #083311) !important;
+  box-shadow: 0 0 32px rgba(43,255,110,0.8), 0 0 10px rgba(30,215,96,0.6), 0 0 6px #000,
+              inset 0 0 22px rgba(43,255,110,0.45) !important;
 }
 .light-yellow {
   color: #ffee30;
   border-color: #aaaa20;
+  background: radial-gradient(circle at 50% 48%, #1a1603, #241e04 55%, #2e2606) !important;
   box-shadow: 0 0 22px rgba(210,200,0,0.5), 0 0 6px #000,
               inset 0 0 16px rgba(160,150,0,0.3);
 }
@@ -145,27 +148,27 @@ html, body {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  gap: 1px;
+  gap: 2px;
   line-height: 1;
 }
 
 #nic-note {
   font-family: 'Courier New', 'Consolas', monospace;
-  font-size: 28px;
-  font-weight: bold;
+  font-size: 38px;
+  font-weight: 900;
   color: inherit;
-  text-shadow: 0 0 10px currentColor, 0 0 3px currentColor;
+  text-shadow: 0 0 14px currentColor, 0 0 4px currentColor;
   letter-spacing: -1px;
 }
 
 #nic-oct {
   font-family: 'Courier New', 'Consolas', monospace;
-  font-size: 14px;
+  font-size: 19px;
   font-weight: bold;
   color: inherit;
-  margin-bottom: 3px;
-  text-shadow: 0 0 8px currentColor;
-  opacity: 0.85;
+  margin-bottom: 5px;
+  text-shadow: 0 0 10px currentColor;
+  opacity: 0.9;
 }
 
 /* ── Note Wheel ── */

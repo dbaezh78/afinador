@@ -30,7 +30,7 @@ const A4_FREQ        = 440;
 const A4_MIDI        = 69;
 const IN_TUNE_CENTS  = 5;
 const CLOSE_CENTS    = 15;
-const FFT_SIZE       = 4096;
+const FFT_SIZE       = 2048; // Exactly matches gtuner BUF_SIZE for optimal time-frequency resolution
 const MIN_CONF       = 0.90;
 const CELL_W         = 72;   // must match CSS --cell-w
 
@@ -143,17 +143,38 @@ const nicNote   = document.getElementById('nic-note');
 const nicOct    = document.getElementById('nic-oct');
 const freqValEl = document.getElementById('freq-val');
 
-function highlightDetectedString(note, octave, cents) {
+function highlightDetectedString(note, octave, cents, freq = null) {
   const rows = document.querySelectorAll('.string-row');
   let matchedIdx = -1;
 
-  // Match with guitar strings
-  GUITAR_STRINGS.forEach((str, idx) => {
-    const sNote = str.note.replace(/\d/, '');
-    if (sNote === note && (octave === undefined || Math.abs(str.octave - octave) <= 1)) {
-      matchedIdx = idx;
-    }
-  });
+  // Best match by frequency proximity or note + octave
+  if (freq && freq > 0) {
+    let minDiff = Infinity;
+    GUITAR_STRINGS.forEach((str, idx) => {
+      // Half an octave range check (~40% frequency distance)
+      const ratio = freq / str.freq;
+      const diff = Math.abs(Math.log2(ratio));
+      if (diff < 0.35 && diff < minDiff) {
+        minDiff = diff;
+        matchedIdx = idx;
+      }
+    });
+  }
+
+  // Fallback: match by note name and closest octave
+  if (matchedIdx === -1) {
+    let bestOctDiff = Infinity;
+    GUITAR_STRINGS.forEach((str, idx) => {
+      const sNote = str.note.replace(/\d/, '');
+      if (sNote === note) {
+        const octDiff = octave !== undefined ? Math.abs(str.octave - octave) : 0;
+        if (octDiff < bestOctDiff) {
+          bestOctDiff = octDiff;
+          matchedIdx = idx;
+        }
+      }
+    });
+  }
 
   rows.forEach(r => {
     const idx = parseInt(r.dataset.idx);
@@ -203,7 +224,7 @@ function updateNoteWheel(note, cents, octave = 4, frequency = null) {
   if (nicOct)  nicOct.textContent  = octave;
 
   // Highlight and trigger vibration on the matched guitar string
-  const matchedIdx = highlightDetectedString(note, octave, cents);
+  const matchedIdx = highlightDetectedString(note, octave, cents, frequency);
   if (matchedIdx !== -1) {
     const now = performance.now();
     // If not vibrated recently (debounce 1.5s), trigger string wave vibration
@@ -232,11 +253,15 @@ function updateNoteWheel(note, cents, octave = 4, frequency = null) {
     }
   }
 
-  // Indicator light colour
+  // Indicator light colour: turns emerald green when in tune
   const abs = Math.abs(cents);
-  if      (abs <= IN_TUNE_CENTS) indicatorLight.className = 'light-green';
-  else if (abs <= CLOSE_CENTS)   indicatorLight.className = 'light-yellow';
-  else                            indicatorLight.className = 'light-red';
+  if (abs <= IN_TUNE_CENTS) {
+    indicatorLight.className = 'light-green';
+  } else if (abs <= CLOSE_CENTS) {
+    indicatorLight.className = 'light-yellow';
+  } else {
+    indicatorLight.className = 'light-red';
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -287,7 +312,7 @@ function handleStringTap(idx, rowEl) {
   // 3. Immediately update UI to this exact string chord / note, octave, and Hz
   displayNote   = noteName;
   displayOctave = str.octave;
-  displayFreq   = str.freq;
+  let displayFreq = str.freq;
   displayCents  = 0;
   targetAngle   = 0;
   needleAngle   = 0;
@@ -298,7 +323,7 @@ function handleStringTap(idx, rowEl) {
   drawMeter(0);
 
   // Update note wheel and frequency display
-  updateNoteWheel(noteName, 0, str.octave, str.freq);
+  updateNoteWheel(noteName, 0, str.octave, displayFreq);
 
   // 4. Toggle string lock
   document.querySelectorAll('.string-row').forEach(r => r.classList.remove('active'));
@@ -325,74 +350,100 @@ function ensureAudioCtx() {
   if (audioCtx.state === 'suspended') audioCtx.resume();
 }
 
+/**
+ * Play a synthetic harmonic chime when a string is perfectly in tune.
+ * Matches gtuner's success bell tone.
+ */
+let isMuted = false;
+let lastChimeTime = 0;
+
+function playSuccessChime() {
+  if (isMuted) return;
+  ensureAudioCtx();
+  if (!audioCtx) return;
+
+  const now = performance.now();
+  if (now - lastChimeTime < 900) return; // Prevent chime spamming
+  lastChimeTime = now;
+
+  try {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(1760, audioCtx.currentTime + 0.15);
+
+    gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.25);
+
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.25);
+  } catch (e) {
+    console.error('Error playing chime:', e);
+  }
+}
+
 // ── Improved Karplus-Strong — guitar-optimised ────────
 /**
- * @param {number} freq       - Target frequency in Hz
- * @param {number} stringIdx  - 0 (E2, thickest) … 5 (E4, thinnest)
+ * Synthesises a plucked guitar string note using the Karplus-Strong algorithm.
+ * Pluck excitation is filtered noise (bridge-proximity simulation).
+ * Wound strings (E2, A2, D3) have longer decay and warmer filtering than plain (G3, B3, E4).
+ *
+ * @param {number} freq       - fundamental frequency in Hz
+ * @param {number} stringIdx  - 0=E2 (thickest), 5=E4 (thinnest)
  */
-function playKarplusStrong(freq, stringIdx = 3) {
+function playKarplusStrong(freq, stringIdx) {
   ensureAudioCtx();
 
-  const sr      = audioCtx.sampleRate;
-  const period  = Math.round(sr / freq);
+  const sr = audioCtx.sampleRate;
+  const period = Math.round(sr / freq);
+  if (period < 2) return;
 
-  // String characteristics
-  // Lower (wound) strings: darker tone, longer sustain
-  const isWound   = stringIdx <= 2;
-  const pickPos   = isWound ? 0.12 : 0.18;   // closer to bridge = brighter
-  const damping   = isWound
-    ? 0.4975 + stringIdx * 0.0002            // wound  → slightly less damping
-    : 0.4970 - (stringIdx - 3) * 0.0002;    // plain  → slightly more damping
-  const duration  = 3.5 - stringIdx * 0.25;  // thicker strings sustain longer
-  const totalSamps = Math.round(sr * duration);
+  const isWound  = stringIdx < 3;
+  const duration = isWound ? 3.5 : 2.0;
+  const totalSamples = Math.floor(sr * duration);
 
-  const offBuf = audioCtx.createBuffer(1, totalSamps, sr);
-  const data   = offBuf.getChannelData(0);
+  const buffer = audioCtx.createBuffer(1, totalSamples, sr);
+  const data   = buffer.getChannelData(0);
 
-  // ── Excitation: white noise pre-filtered by pick position ──
-  const ring = new Float32Array(period);
-  for (let i = 0; i < period; i++) ring[i] = Math.random() * 2 - 1;
-
-  // Moving-average passes simulate the pick-position filter:
-  // fewer passes = brighter (bridge pick), more = darker (neck pick)
-  const passes = Math.max(1, Math.round(pickPos * period * 0.8));
-  for (let p = 0; p < passes; p++) {
-    for (let i = 0; i < period; i++) {
-      ring[i] = 0.5 * (ring[i] + ring[(i + 1) % period]);
-    }
+  const noise = new Float32Array(period);
+  let prevSample = 0;
+  const pickFilterCoeff = isWound ? 0.35 : 0.65;
+  for (let i = 0; i < period; i++) {
+    const white = Math.random() * 2 - 1;
+    prevSample  = prevSample + pickFilterCoeff * (white - prevSample);
+    noise[i]    = prevSample;
   }
 
-  // ── Karplus-Strong main loop ──
-  for (let i = 0; i < totalSamps; i++) {
-    const i0 = i % period;
-    const i1 = (i + 1) % period;
-    ring[i0]  = damping * (ring[i0] + ring[i1]);
-    data[i]   = ring[i0];
+  for (let i = 0; i < period; i++) data[i] = noise[i];
+
+  const damping = isWound ? 0.993 : 0.987;
+  for (let i = period; i < totalSamples; i++) {
+    data[i] = (data[i - period] + data[i - period + 1]) * 0.5 * damping;
   }
 
-  const src  = audioCtx.createBufferSource();
-  src.buffer = offBuf;
+  const src = audioCtx.createBufferSource();
+  src.buffer = buffer;
 
-  // Attack-decay gain envelope
   const gain = audioCtx.createGain();
   gain.gain.setValueAtTime(0, audioCtx.currentTime);
-  gain.gain.linearRampToValueAtTime(0.72, audioCtx.currentTime + 0.003);
+  gain.gain.linearRampToValueAtTime(0.85, audioCtx.currentTime + 0.003);
   gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
 
-  // Low-pass: remove aliasing, tune brightness per string
   const lp = audioCtx.createBiquadFilter();
   lp.type            = 'lowpass';
   lp.frequency.value = isWound ? Math.min(freq * 12, 8000) : Math.min(freq * 9, 6500);
   lp.Q.value         = 0.8;
 
-  // Body resonance peak (~200-400 Hz for low strings, ~600 Hz for high)
   const body = audioCtx.createBiquadFilter();
   body.type            = 'peaking';
   body.frequency.value = isWound ? 250 + stringIdx * 40 : 600 + stringIdx * 80;
   body.gain.value      = isWound ? 4 : 2.5;
   body.Q.value         = 1.8;
 
-  // Slight high-frequency presence boost for plain strings
   let chain = src;
   src.connect(body);
   body.connect(lp);
@@ -416,7 +467,6 @@ function playKarplusStrong(freq, stringIdx = 3) {
 function startStringVibration(stringIdx, rowEl) {
   if (!vibrationEnabled) return;
 
-  // Cancel any previous vibration on this string
   if (activeVibrations.has(stringIdx)) {
     cancelAnimationFrame(activeVibrations.get(stringIdx));
     activeVibrations.delete(stringIdx);
@@ -426,7 +476,6 @@ function startStringVibration(stringIdx, rowEl) {
   const stringLine = rowEl.querySelector('.string-line');
   if (!vibeCanvas || !stringLine) return;
 
-  // Get dimensions from the wrap (parent of canvas)
   const wrap  = vibeCanvas.parentElement;
   const wRect = wrap.getBoundingClientRect();
   const dpr   = window.devicePixelRatio || 1;
@@ -444,105 +493,122 @@ function startStringVibration(stringIdx, rowEl) {
   const CY  = H / 2;
   const sw  = parseFloat(stringLine.style.getPropertyValue('--sw')) || 2;
 
-  // Visual oscillation rate: thicker strings appear to move slower
-  const vizHz   = 5 + stringIdx * 0.6;   // 5 Hz (E2) … 8 Hz (E4)
-  const vibMs   = 2800;                   // total animation duration
+  const vizHz   = 5 + stringIdx * 0.6;
+  const vibMs   = 2800;
   const startT  = performance.now();
 
-  // Show canvas, hide static line
-  vibeCanvas.style.display = 'block';
+  const maxAmp  = Math.min(H * 0.42, 6 + (5 - stringIdx) * 1.8);
+
   stringLine.style.opacity = '0';
+  vibeCanvas.style.display = 'block';
 
-  function frame(now) {
+  function drawWave(now) {
     const elapsed = now - startT;
-    const t       = Math.min(elapsed / vibMs, 1);
-
-    if (t >= 1) {
-      // Vibration done — restore static string
-      vCtx.clearRect(0, 0, W, H);
-      vibeCanvas.style.display = 'none';
-      stringLine.style.opacity = '1';
-      activeVibrations.delete(stringIdx);
+    if (elapsed >= vibMs || !vibrationEnabled) {
+      stopVibration(stringIdx, vibeCanvas, stringLine);
       return;
     }
 
-    // Exponential amplitude decay
-    const decay    = Math.exp(-4.5 * t);
-    const maxAmp   = Math.max(sw * 0.5, H * 0.34 * decay);
-    const tSec     = elapsed / 1000;
+    const decay1 = Math.exp(-elapsed / 900);
+    const decay2 = Math.exp(-elapsed / 600);
+    const decay3 = Math.exp(-elapsed / 400);
+
+    const t   = elapsed / 1000;
+    const w1  = 2 * Math.PI * vizHz;
+    const w2  = 2 * Math.PI * (vizHz * 2.02);
+    const w3  = 2 * Math.PI * (vizHz * 3.01);
+
+    const c1 = Math.cos(w1 * t) * decay1;
+    const c2 = Math.cos(w2 * t) * decay2 * 0.35;
+    const c3 = Math.cos(w3 * t) * decay3 * 0.12;
 
     vCtx.clearRect(0, 0, W, H);
 
-    // ── Draw standing wave with 3 harmonics ──────────────
-    // y(x,t) = Σ Aₙ · sin(n·π·x) · cos(n·ω·t) · decayₙ
-    // x is normalised 0→1, ends fixed at 0 and 1
+    vCtx.save();
+    vCtx.shadowColor   = `rgba(255, 230, 140, ${(decay1 * 0.7).toFixed(2)})`;
+    vCtx.shadowBlur    = Math.round(decay1 * 8);
+
     vCtx.beginPath();
-    for (let px = 0; px <= W; px++) {
-      const x = px / W;
+    const steps = Math.min(120, Math.round(W / 2));
+    for (let s = 0; s <= steps; s++) {
+      const xNorm = s / steps;
+      const x     = xNorm * W;
 
-      // Fundamental + 2nd + 3rd harmonic (each decays faster)
-      const h1 = Math.sin(Math.PI * x)     * Math.cos(2 * Math.PI * vizHz * tSec);
-      const h2 = Math.sin(2 * Math.PI * x) * Math.cos(4 * Math.PI * vizHz * tSec)
-                 * Math.exp(-1.2 * t);
-      const h3 = Math.sin(3 * Math.PI * x) * Math.cos(6 * Math.PI * vizHz * tSec)
-                 * Math.exp(-2.5 * t);
+      const shape1 = Math.sin(Math.PI * xNorm);
+      const shape2 = Math.sin(2 * Math.PI * xNorm);
+      const shape3 = Math.sin(3 * Math.PI * xNorm);
 
-      const dy = (h1 + h2 * 0.35 + h3 * 0.12) * maxAmp;
+      const yDisp = (shape1 * c1 + shape2 * c2 + shape3 * c3) * maxAmp;
+      const y     = CY + yDisp;
 
-      if (px === 0) vCtx.moveTo(0,  CY + dy);
-      else          vCtx.lineTo(px, CY + dy);
+      if (s === 0) vCtx.moveTo(x, y);
+      else         vCtx.lineTo(x, y);
     }
 
-    // String glow: opacity follows amplitude
-    const alpha = 0.6 + 0.4 * decay;
-    vCtx.strokeStyle    = `rgba(232, 216, 176, ${alpha})`;
-    vCtx.lineWidth      = sw;
-    vCtx.lineCap        = 'round';
-    vCtx.shadowColor    = `rgba(240, 220, 160, ${alpha * 0.55})`;
-    vCtx.shadowBlur     = sw * 3.5;
-    vCtx.stroke();
-    vCtx.shadowBlur     = 0;
+    const strGrad = vCtx.createLinearGradient(0, 0, W, 0);
+    strGrad.addColorStop(0,   '#b09878');
+    strGrad.addColorStop(0.25,'#f5e8c8');
+    strGrad.addColorStop(0.6, '#d8c8a0');
+    strGrad.addColorStop(1,   '#907848');
 
-    const raf = requestAnimationFrame(frame);
-    activeVibrations.set(stringIdx, raf);
+    vCtx.strokeStyle = strGrad;
+    vCtx.lineWidth   = sw;
+    vCtx.lineCap     = 'round';
+    vCtx.stroke();
+    vCtx.restore();
+
+    const handle = requestAnimationFrame(drawWave);
+    activeVibrations.set(stringIdx, handle);
   }
 
-  const raf = requestAnimationFrame(frame);
-  activeVibrations.set(stringIdx, raf);
+  const handle = requestAnimationFrame(drawWave);
+  activeVibrations.set(stringIdx, handle);
 }
 
-/** Stop all running vibration animations (e.g. on resize) */
+function stopVibration(stringIdx, vibeCanvas, stringLine) {
+  if (activeVibrations.has(stringIdx)) {
+    cancelAnimationFrame(activeVibrations.get(stringIdx));
+    activeVibrations.delete(stringIdx);
+  }
+  if (vibeCanvas) {
+    const vCtx = vibeCanvas.getContext('2d');
+    vCtx.clearRect(0, 0, vibeCanvas.width, vibeCanvas.height);
+    vibeCanvas.style.display = 'none';
+  }
+  if (stringLine) {
+    stringLine.style.opacity = '1';
+  }
+}
+
 function stopAllVibrations() {
-  activeVibrations.forEach(raf => cancelAnimationFrame(raf));
+  activeVibrations.forEach((handle, idx) => {
+    cancelAnimationFrame(handle);
+    const rowEl = document.querySelector(`.string-row[data-idx="${idx}"]`);
+    if (rowEl) {
+      const vibeCanvas = rowEl.querySelector('.string-vibe-canvas');
+      const stringLine = rowEl.querySelector('.string-line');
+      stopVibration(idx, vibeCanvas, stringLine);
+    }
+  });
   activeVibrations.clear();
-  document.querySelectorAll('.string-vibe-canvas').forEach(c => {
-    c.style.display = 'none';
-  });
-  document.querySelectorAll('.string-line').forEach(l => {
-    l.style.opacity = '1';
-  });
 }
 
 // ═══════════════════════════════════════════════════════
-//  CANVAS RESIZE
+//  RESIZE CANVASES
 // ═══════════════════════════════════════════════════════
 function resizeCanvases() {
-  const dpr  = window.devicePixelRatio || 1;
+  const dpr = window.devicePixelRatio || 1;
 
-  // ── Meter ──
-  const mb   = document.getElementById('meter-bg');
-  const mr   = mb.getBoundingClientRect();
+  const mr = meterCanvas.parentElement.getBoundingClientRect();
   meterCanvas.width  = Math.round(mr.width  * dpr);
   meterCanvas.height = Math.round(mr.height * dpr);
   meterCanvas.style.width  = mr.width  + 'px';
   meterCanvas.style.height = mr.height + 'px';
-  // Draw will happen in the RAF loop; do one immediate draw
   mCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
   drawMeter(needleAngle);
 
-  // ── Fretboard ──
-  const sc   = document.getElementById('strings-container');
-  const sr   = sc.getBoundingClientRect();
+  const sc = document.getElementById('strings-container');
+  const sr = sc.getBoundingClientRect();
   fretCanvas.width  = Math.round(sr.width  * dpr);
   fretCanvas.height = Math.round(sr.height * dpr);
   fretCanvas.style.width  = sr.width  + 'px';
@@ -555,22 +621,19 @@ function resizeCanvases() {
 // ═══════════════════════════════════════════════════════
 function drawMeter(angleDeg) {
   const dpr = window.devicePixelRatio || 1;
-  const W   = meterCanvas.width  / dpr;   // CSS pixels
+  const W   = meterCanvas.width  / dpr;
   const H   = meterCanvas.height / dpr;
 
   mCtx.clearRect(0, 0, W, H);
 
-  // ── Pivot: aligned with the 82px indicator light centre (bottom: 26px + 41px = 67px from bottom) ──
   const cx  = W / 2;
   const cy  = H - 67;
   const R   = Math.min(W * 0.46, cy - 8);
 
-  // ── EXACT SEMICIRCLE: from 180° (Math.PI) to 360° (2*Math.PI) ──
-  const startA = Math.PI * 1.0;   // 180° (horizontal left base)
-  const endA   = Math.PI * 2.0;   // 360° / 0° (horizontal right base)
-  const span   = Math.PI;         // 180° sweep
+  const startA = Math.PI * 1.0;
+  const endA   = Math.PI * 2.0;
+  const span   = Math.PI;
 
-  // ── Cream dial face (Semicircle with flat horizontal bottom) ──
   mCtx.beginPath();
   mCtx.moveTo(cx - R, cy);
   mCtx.arc(cx, cy, R, startA, endA, false);
@@ -584,7 +647,6 @@ function drawMeter(angleDeg) {
   mCtx.fillStyle = grad;
   mCtx.fill();
 
-  // Outer border arc & flat bottom base
   mCtx.beginPath();
   mCtx.arc(cx, cy, R, startA, endA);
   mCtx.strokeStyle = '#8a7050';
@@ -598,9 +660,8 @@ function drawMeter(angleDeg) {
   mCtx.lineWidth   = 1.5;
   mCtx.stroke();
 
-  // ── Green central tuning sector / wedge (±5 cents, translucent) ──
   const zH = (IN_TUNE_CENTS / 100) * span;
-  const cA  = startA + 0.5 * span; // 1.5 * Math.PI (top vertical 270°)
+  const cA  = startA + 0.5 * span;
   mCtx.beginPath();
   mCtx.moveTo(cx, cy);
   mCtx.arc(cx, cy, R * 0.96, cA - zH, cA + zH);
@@ -608,7 +669,6 @@ function drawMeter(angleDeg) {
   mCtx.fillStyle = 'rgba(70, 180, 70, 0.22)';
   mCtx.fill();
 
-  // ── Scale ticks & labels ─────────────────────────────
   for (let v = -50; v <= 50; v += 5) {
     const major = (v % 10 === 0);
     const norm  = (v + 50) / 100;
@@ -637,14 +697,12 @@ function drawMeter(angleDeg) {
     }
   }
 
-  // "cent" label (bottom-left)
   mCtx.font         = `italic ${Math.max(9, Math.round(R * 0.046))}px Georgia`;
   mCtx.fillStyle    = '#6b5842';
   mCtx.textAlign    = 'left';
   mCtx.textBaseline = 'alphabetic';
   mCtx.fillText('cent', cx - R * 0.88, cy + 18);
 
-  // Watermark text
   mCtx.save();
   mCtx.font      = `italic bold ${Math.round(R * 0.075)}px Georgia`;
   mCtx.fillStyle = 'rgba(120,80,40,0.12)';
@@ -655,7 +713,6 @@ function drawMeter(angleDeg) {
   mCtx.fillText('Afinador Pro', 0, 0);
   mCtx.restore();
 
-  // ── Needle ───────────────────────────────────────────
   const nAngle = startA + ((angleDeg + 50) / 100) * span;
   const nLen   = R * 0.94;
   const nCos   = Math.cos(nAngle);
@@ -676,7 +733,6 @@ function drawMeter(angleDeg) {
   mCtx.stroke();
   mCtx.restore();
 
-  // Pivot dot
   mCtx.beginPath();
   mCtx.arc(cx, cy, 6.5, 0, Math.PI * 2);
   const pivGrad = mCtx.createRadialGradient(cx - 2, cy - 2, 1, cx, cy, 6.5);
@@ -692,22 +748,19 @@ function drawMeter(angleDeg) {
 function drawFretboardBg() {
   const dpr = window.devicePixelRatio || 1;
 
-  // Always reset transform to avoid accumulation
   fCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   const W = fretCanvas.width  / dpr;
   const H = fretCanvas.height / dpr;
   fCtx.clearRect(0, 0, W, H);
 
-  const pegW     = 72;          // must match .string-peg width
-  const numFrets = 2.5;         // exactly 2 frets and a half visible
+  const pegW     = 72;
+  const numFrets = 2.5;
   const fretW    = (W - pegW) / numFrets;
 
-  // ── Peg column background ──
   fCtx.fillStyle = '#140a04';
   fCtx.fillRect(0, 0, pegW, H);
 
-  // ── Wood grain for the neck ──
   const woodGrad = fCtx.createLinearGradient(pegW, 0, W, 0);
   woodGrad.addColorStop(0,    '#2e1a0a');
   woodGrad.addColorStop(0.25, '#3d2612');
@@ -716,7 +769,6 @@ function drawFretboardBg() {
   fCtx.fillStyle = woodGrad;
   fCtx.fillRect(pegW, 0, W - pegW, H);
 
-  // ── Subtle wood grain stripes (horizontal) ──
   for (let y = 0; y < H; y += 18) {
     fCtx.beginPath();
     fCtx.moveTo(pegW, y);
@@ -726,12 +778,10 @@ function drawFretboardBg() {
     fCtx.stroke();
   }
 
-  // ── Fret lines — Nut (0), Fret 1, Fret 2 ──
   for (let f = 0; f <= 2; f++) {
     const x = pegW + f * fretW;
 
     if (f === 0) {
-      // Nut: wider, ivory coloured
       const nutGrad = fCtx.createLinearGradient(x - 4, 0, x + 4, 0);
       nutGrad.addColorStop(0,   '#a09070');
       nutGrad.addColorStop(0.4, '#e8dcc0');
@@ -739,7 +789,6 @@ function drawFretboardBg() {
       fCtx.fillStyle = nutGrad;
       fCtx.fillRect(x - 4, 0, 7, H);
     } else {
-      // Regular fret: silver/ivory line
       const fGrad = fCtx.createLinearGradient(x - 1, 0, x + 2, 0);
       fGrad.addColorStop(0,   'rgba(160,145,110,0.6)');
       fGrad.addColorStop(0.5, 'rgba(220,205,165,0.85)');
@@ -749,7 +798,6 @@ function drawFretboardBg() {
     }
   }
 
-  // ── Inlay position dots (centered in fret 1 and fret 2) ──
   [1, 2].forEach(f => {
     const x = pegW + (f - 0.5) * fretW;
     const y = H / 2;
@@ -786,7 +834,7 @@ function numberToNoteName(number) {
 }
 
 // ═══════════════════════════════════════════════════════
-//  PITCH DETECTION — gtuner trimmed autocorrelation
+//  PITCH DETECTION — gtuner pure autocorrelation
 // ═══════════════════════════════════════════════════════
 function detectPitch(buf, sampleRate) {
   const size = buf.length;
@@ -798,13 +846,13 @@ function detectPitch(buf, sampleRate) {
   }
   rms = Math.sqrt(rms / size);
 
-  // Minimum RMS threshold to filter ambient room noise
+  // gtuner noise gate threshold (with acoustic fallback for softer plucks on thin string 1)
   if (rms < 0.010) {
     return null;
   }
 
-  // Trim edges to find zero-crossings (as in gtuner)
-  let r1 = 0, r2 = size - 1, thres = 0.2;
+  // gtuner zero-crossing edge trimming (adapts if signal is softer)
+  let r1 = 0, r2 = size - 1, thres = Math.min(0.2, rms * 1.5);
   for (let i = 0; i < size / 2; i++) {
     if (Math.abs(buf[i]) < thres) { r1 = i; break; }
   }
@@ -812,9 +860,9 @@ function detectPitch(buf, sampleRate) {
     if (Math.abs(buf[size - i]) < thres) { r2 = size - i; break; }
   }
 
-  const trimmedBuf = buf.slice(r1, r2);
+  const trimmedBuf = (r2 > r1 && (r2 - r1) >= 256) ? buf.slice(r1, r2) : buf;
   const trimmedLen = trimmedBuf.length;
-  if (trimmedLen < 256) return null;
+  if (trimmedLen < 128) return null;
 
   const c = new Float32Array(trimmedLen);
   for (let i = 0; i < trimmedLen; i++) {
@@ -836,19 +884,10 @@ function detectPitch(buf, sampleRate) {
     }
   }
 
-  if (maxpos === -1 || maxval / c[0] < 0.70) return null;
-
-  // Subharmonic check to prevent octave jumps on guitar low strings (E2, A2)
-  for (let sub = 2; sub <= 4; sub++) {
-    const subP = Math.round(maxpos / sub);
-    if (subP > d && c[subP] > 0.82 * maxval) {
-      maxpos = subP;
-      break;
-    }
-  }
+  if (maxpos <= 0) return null;
 
   let T0 = maxpos;
-  // Parabolic interpolation for sub-sample precision
+  // Exact gtuner parabolic interpolation
   if (T0 > 0 && T0 < trimmedLen - 1) {
     const x1 = c[T0 - 1], x2 = c[T0], x3 = c[T0 + 1];
     const a = (x1 + x3 - 2 * x2) / 2;
@@ -859,7 +898,7 @@ function detectPitch(buf, sampleRate) {
   }
 
   const freq = sampleRate / T0;
-  // Valid guitar/instrument range: 60 Hz to 1200 Hz
+  // Guitar & instrument range (identical to gtuner: 60 Hz to 1200 Hz)
   if (freq >= 60 && freq <= 1200) {
     return freq;
   }
@@ -898,17 +937,18 @@ async function startTuner() {
 
   try {
     ensureAudioCtx();
+    if (audioCtx.state === 'suspended') {
+      await audioCtx.resume();
+    }
     analyser = audioCtx.createAnalyser();
-    analyser.fftSize = FFT_SIZE; // 4096 gives ~10.7 Hz bin resolution at 44.1kHz, perfect for 82.4Hz E2
-    analyser.smoothingTimeConstant = 0.2;
+    analyser.fftSize = FFT_SIZE; // 2048 matches gtuner BUF_SIZE
 
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: false,
         noiseSuppression: false,
         autoGainControl: false
-      },
-      video: false
+      }
     });
     sourceNode = audioCtx.createMediaStreamSource(stream);
     sourceNode.connect(analyser);
@@ -929,23 +969,14 @@ async function startTuner() {
 // Cents smoothing factor: fast enough to follow pitch changes, smooth enough to avoid jitter
 const SMOOTH = 0.16;
 
-/** Return the most-voted {note,octave} from noteHistory, or null */
-function getStableNote() {
-  if (noteHistory.length < 2) return null;
-  const votes = {};
-  noteHistory.forEach(h => {
-    const key = `${h.note}|${h.octave}`;
-    votes[key] = (votes[key] || 0) + 1;
-  });
-  const [topKey, topCount] = Object.entries(votes)
-    .sort((a, b) => b[1] - a[1])[0];
-  // Require 40% consensus for prompt note switching
-  if (topCount / noteHistory.length < 0.40) return null;
-  const [note, octStr] = topKey.split('|');
-  return { note, octave: parseInt(octStr) };
-}
+let toneHitCounter = 0;
+let nearestNoteBuffered = 69; // A4 default
+let noteNumberCounter = 0;
+const HITS_TILL_NOTE_NUMBER_UPDATE = 4; // responsive note switching matching gtuner
+const NEEDLE_BUFFER_LENGTH = 10;
+const needleBuffer = new Array(NEEDLE_BUFFER_LENGTH).fill(0);
 
-let displayFreq = 440.0;
+let displayFreq = 329.6;
 
 function loop() {
   if (!isRunning) return;
@@ -956,43 +987,65 @@ function loop() {
   // ── Pitch detection ──
   if (analyser) {
     analyser.getFloatTimeDomainData(timeDomainBuf);
-    const freq     = detectPitch(timeDomainBuf, audioCtx.sampleRate);
-    const detected = freqToNote(freq);
+    const freq = detectPitch(timeDomainBuf, audioCtx.sampleRate);
 
-    if (detected) {
-      let { note, octave, cents, freq: detFreq } = detected;
+    if (freq && freq > 0) {
+      const detected = freqToNote(freq);
+      if (detected) {
+        let { note, octave, cents, noteNumber, nearestNoteNumber, freqDifference, semitoneStep } = detected;
 
-      if (lockedString !== null) {
-        // Compute cents relative to the locked string's exact frequency
-        const target  = GUITAR_STRINGS[lockedString];
-        const tMidi   = 12 * Math.log2(target.freq / A4_FREQ) + A4_MIDI;
-        const dMidi   = 12 * Math.log2(detected.freq / A4_FREQ) + A4_MIDI;
-        cents         = Math.max(-50, Math.min(50, (dMidi - tMidi) * 100));
-        note          = target.note.replace(/\d/, '');
-        octave        = target.octave;
-        detFreq       = target.freq;
-      }
+        if (lockedString !== null) {
+          // Compute cents relative to the locked string's exact frequency
+          const target = GUITAR_STRINGS[lockedString];
+          const tMidi  = 12 * Math.log2(target.freq / A4_FREQ) + A4_MIDI;
+          const dMidi  = 12 * Math.log2(freq / A4_FREQ) + A4_MIDI;
+          cents        = Math.max(-50, Math.min(50, (dMidi - tMidi) * 100));
+          note         = target.note.replace(/\d/, '');
+          octave       = target.octave;
+        }
 
-      // Push into history buffer for stability voting
-      noteHistory.push({ note, octave });
-      if (noteHistory.length > 8) noteHistory.shift();
+        // gtuner note stability buffering
+        if (nearestNoteNumber !== nearestNoteBuffered) {
+          noteNumberCounter++;
+          if (noteNumberCounter >= HITS_TILL_NOTE_NUMBER_UPDATE) {
+            nearestNoteBuffered = nearestNoteNumber;
+            noteNumberCounter = 0;
+          }
+        } else {
+          noteNumberCounter = 0;
+        }
 
-      // Smooth the cents deviation continuously
-      displayCents = displayCents + SMOOTH * (cents - displayCents);
-      targetAngle  = Math.max(-50, Math.min(50, displayCents));
-      displayFreq  = detFreq;
+        // Needle angle calculation matching gtuner: +/- 45 deg per semitone
+        const targetNeedleAngle = -90 * ((freqDifference / (semitoneStep || 1)) * 2);
+        needleBuffer.shift();
+        needleBuffer.push(targetNeedleAngle);
+        const avgAngle = needleBuffer.reduce((a, b) => a + b, 0) / needleBuffer.length;
+        targetAngle = Math.max(-50, Math.min(50, avgAngle));
 
-      // Only commit a new note when history votes agree
-      const stable = getStableNote();
-      if (stable) {
-        displayNote   = stable.note;
-        displayOctave = stable.octave;
+        displayNote   = numberToNoteName(nearestNoteBuffered);
+        displayOctave = Math.floor(nearestNoteBuffered / 12) - 1;
+        displayCents  = cents;
+        displayFreq   = freq;
+
+        // Comprobación de afinación en el punto exacto (< 4 cents) y disparo del sonido (gtuner)
+        if (Math.abs(cents) <= 4) {
+          toneHitCounter++;
+          if (toneHitCounter >= 12) {
+            playSuccessChime();
+            toneHitCounter = 0;
+          }
+        } else {
+          toneHitCounter = 0;
+        }
       }
     } else {
-      // Silence → drift back towards 0 smoothly
-      displayCents  *= 0.90;
-      targetAngle    = displayCents;
-      if (noteHistory.length > 0) noteHistory.shift();
+      // Silence / no signal -> smoothly return needle to center
+      needleBuffer.shift();
+      needleBuffer.push(0);
+      const avgAngle = needleBuffer.reduce((a, b) => a + b, 0) / needleBuffer.length;
+      targetAngle = avgAngle;
+      displayCents *= 0.90;
+      toneHitCounter = 0;
     }
   }
 
@@ -1150,6 +1203,16 @@ vibrationToggle.addEventListener('change', () => {
     stopAllVibrations();
   }
 });
+
+// ═══════════════════════════════════════════════════════
+//  SOUND CHIME SETTING
+// ═══════════════════════════════════════════════════════
+const chimeToggle = document.getElementById('chime-toggle');
+if (chimeToggle) {
+  chimeToggle.addEventListener('change', () => {
+    isMuted = !chimeToggle.checked;
+  });
+}
 
 // ═══════════════════════════════════════════════════════
 //  START

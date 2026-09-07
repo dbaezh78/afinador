@@ -833,10 +833,15 @@ function numberToNoteName(number) {
   return NOTES[idx];
 }
 
-// Noise reduction level (0 = all audio enters, 100 = maximum noise filtering)
-let noiseReductionLevel = 30;
+// Microphone sensitivity level (0 = muted/no audio, 100 = maximum sensitivity)
+let noiseReductionLevel = 70;
 
 function detectPitch(buf, sampleRate) {
+  // If sensitivity is 0, microphone receives nothing (completely muted)
+  if (noiseReductionLevel <= 0) {
+    return null;
+  }
+
   const size = buf.length;
   let rms = 0;
 
@@ -846,8 +851,10 @@ function detectPitch(buf, sampleRate) {
   }
   rms = Math.sqrt(rms / size);
 
-  // Noise gate threshold mapped from noiseReductionLevel (0 -> 0.003, 100 -> 0.065)
-  const baseNoiseThreshold = 0.003 + (noiseReductionLevel / 100) * 0.062;
+  // When sensitivity is 100: base threshold is at its lowest (0.002, maximum mic capture)
+  // As sensitivity decreases towards 1: threshold progressively increases up to 0.08
+  const sensFactor = (100 - noiseReductionLevel) / 100;
+  const baseNoiseThreshold = 0.002 + sensFactor * 0.078;
   if (rms < baseNoiseThreshold) {
     return null;
   }
@@ -1013,15 +1020,16 @@ function loop() {
         holdFramesAfterPluck = 25; // Lock onto the string fundamental across its decay
       }
 
-      // Dynamic gate mapped with noiseReductionLevel:
-      // When noiseReductionLevel = 0, threshold is low (0.003, minimal pluck gate)
-      // When noiseReductionLevel = 100, requires much cleaner ratio and higher floor
-      const gateRatio = 0.05 + (noiseReductionLevel / 100) * 0.25;
-      const minGate = 0.003 + (noiseReductionLevel / 100) * 0.05;
+      // Dynamic gate mapped with sensitivity (noiseReductionLevel):
+      // When noiseReductionLevel = 100 (maximum sensitivity): minimal gate, picks up the subtlest notes
+      // When noiseReductionLevel drops: raises gate and requires higher harmonic clarity
+      const sensFactor = (100 - noiseReductionLevel) / 100;
+      const gateRatio = 0.04 + sensFactor * 0.28;
+      const minGate = 0.002 + sensFactor * 0.06;
       const dynamicGate = Math.max(minGate, peakRms * gateRatio);
 
-      // Minimum harmonic clarity required (0 -> 0.25, 100 -> 0.65)
-      const minConfidence = 0.25 + (noiseReductionLevel / 100) * 0.40;
+      // Harmonic clarity required: 0.25 at 100% sensitivity, up to 0.65 at low sensitivity
+      const minConfidence = 0.25 + sensFactor * 0.40;
 
       if (rms >= dynamicGate && confidence >= minConfidence) {
         validSignal = true;
@@ -1287,10 +1295,10 @@ if (noiseSlider) {
 
 if (btnResetNoise && noiseSlider) {
   btnResetNoise.addEventListener('click', () => {
-    noiseReductionLevel = 30;
-    noiseSlider.value = 30;
+    noiseReductionLevel = 70;
+    noiseSlider.value = 70;
     if (noiseValEl) {
-      noiseValEl.textContent = '30%';
+      noiseValEl.textContent = '70%';
     }
   });
 }

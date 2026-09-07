@@ -124,16 +124,16 @@
           <div class="setting-row slider-row">
             <div class="setting-info">
               <div class="slider-header">
-                <span class="setting-label">Reducción de ruido ambiental</span>
+                <span class="setting-label">Sensibilidad del micrófono</span>
                 <div class="slider-controls-top">
-                  <button id="btn-reset-noise" title="Restablecer valor por defecto (30%)">⟲ Defecto</button>
-                  <span id="noise-reduction-val" class="slider-badge">30%</span>
+                  <button id="btn-reset-noise" title="Restablecer valor por defecto (70%)">⟲ Defecto</button>
+                  <span id="noise-reduction-val" class="slider-badge">70%</span>
                 </div>
               </div>
-              <span class="setting-desc">0 = entra todo el sonido | 100 = reduce todo el ruido ambiental</span>
+              <span class="setting-desc">0 = silencio (micrófono cerrado) | 100 = máxima sensibilidad</span>
               <div class="slider-container">
                 <span class="slider-min">0</span>
-                <input type="range" id="noise-reduction-slider" min="0" max="100" value="30" step="1" />
+                <input type="range" id="noise-reduction-slider" min="0" max="100" value="70" step="1" />
                 <span class="slider-max">100</span>
               </div>
             </div>

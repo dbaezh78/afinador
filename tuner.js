@@ -897,10 +897,13 @@ function detectPitch(buf, sampleRate) {
     }
   }
 
+  // Confidence is the ratio of correlation peak to energy at lag 0
+  const confidence = c[0] > 0 ? (maxval / c[0]) : 0;
   const freq = sampleRate / T0;
-  // Guitar & instrument range (identical to gtuner: 60 Hz to 1200 Hz)
-  if (freq >= 60 && freq <= 1200) {
-    return freq;
+
+  // Guitar & instrument range (60 Hz to 1200 Hz) and minimum clarity threshold
+  if (freq >= 60 && freq <= 1200 && confidence >= 0.35) {
+    return { freq, confidence, rms };
   }
   return null;
 }
@@ -978,6 +981,12 @@ const needleBuffer = new Array(NEEDLE_BUFFER_LENGTH).fill(0);
 
 let displayFreq = 329.6;
 
+// Dynamic envelope tracking and smooth decay state
+let peakRms = 0;
+let holdFramesAfterPluck = 0;
+let currentConfidence = 0;
+let lastDetectedNote = 69;
+
 function loop() {
   if (!isRunning) return;
   animFrame = requestAnimationFrame(loop);
@@ -987,76 +996,115 @@ function loop() {
   // ── Pitch detection ──
   if (analyser) {
     analyser.getFloatTimeDomainData(timeDomainBuf);
-    const freq = detectPitch(timeDomainBuf, audioCtx.sampleRate);
+    const pitchResult = detectPitch(timeDomainBuf, audioCtx.sampleRate);
 
-    if (freq && freq > 0) {
-      const detected = freqToNote(freq);
-      if (detected) {
-        let { note, octave, cents, noteNumber, nearestNoteNumber, freqDifference, semitoneStep } = detected;
+    // Adaptive noise floor: decays slowly, rises when a strong pluck occurs
+    peakRms *= 0.96;
 
-        if (lockedString !== null) {
-          // Compute cents relative to the locked string's exact frequency
-          const target = GUITAR_STRINGS[lockedString];
-          const tMidi  = 12 * Math.log2(target.freq / A4_FREQ) + A4_MIDI;
-          const dMidi  = 12 * Math.log2(freq / A4_FREQ) + A4_MIDI;
-          cents        = Math.max(-50, Math.min(50, (dMidi - tMidi) * 100));
-          note         = target.note.replace(/\d/, '');
-          octave       = target.octave;
-        }
+    let validSignal = false;
 
-        // gtuner note stability buffering
-        if (nearestNoteNumber !== nearestNoteBuffered) {
-          noteNumberCounter++;
-          if (noteNumberCounter >= HITS_TILL_NOTE_NUMBER_UPDATE) {
-            nearestNoteBuffered = nearestNoteNumber;
+    if (pitchResult) {
+      const { freq, confidence, rms } = pitchResult;
+
+      // Detect strong pluck (tope de la cuerda)
+      if (rms > peakRms) {
+        peakRms = rms;
+        holdFramesAfterPluck = 25; // Lock onto the string fundamental across its decay
+      }
+
+      // Dynamic gate: require sound to be near the plucked string energy rather than distant faint sounds
+      // If a strong pluck recently occurred, reject faint background noise (< 15% of peak)
+      const dynamicGate = Math.max(0.010, peakRms * 0.18);
+
+      if (rms >= dynamicGate && confidence >= 0.40) {
+        validSignal = true;
+        currentConfidence = confidence;
+        const detected = freqToNote(freq);
+
+        if (detected) {
+          let { note, octave, cents, noteNumber, nearestNoteNumber, freqDifference, semitoneStep } = detected;
+
+          if (lockedString !== null) {
+            // Compute cents relative to the locked string's exact frequency
+            const target = GUITAR_STRINGS[lockedString];
+            const tMidi  = 12 * Math.log2(target.freq / A4_FREQ) + A4_MIDI;
+            const dMidi  = 12 * Math.log2(freq / A4_FREQ) + A4_MIDI;
+            cents        = Math.max(-50, Math.min(50, (dMidi - tMidi) * 100));
+            note         = target.note.replace(/\d/, '');
+            octave       = target.octave;
+          }
+
+          // Hysteresis: prevent changing note if we're in the decay phase of an active note unless energy strongly spikes
+          const noteDistance = Math.abs(nearestNoteNumber - nearestNoteBuffered);
+          const isNoteChange = noteDistance > 0;
+
+          if (isNoteChange) {
+            // Require more consistent hits or higher energy to switch to a completely different note
+            noteNumberCounter++;
+            const requiredHits = holdFramesAfterPluck > 0 ? 8 : HITS_TILL_NOTE_NUMBER_UPDATE;
+            if (noteNumberCounter >= requiredHits) {
+              nearestNoteBuffered = nearestNoteNumber;
+              noteNumberCounter = 0;
+            }
+          } else {
             noteNumberCounter = 0;
           }
-        } else {
-          noteNumberCounter = 0;
-        }
 
-        // Needle angle calculation matching gtuner: +/- 45 deg per semitone
-        const targetNeedleAngle = -90 * ((freqDifference / (semitoneStep || 1)) * 2);
-        needleBuffer.shift();
-        needleBuffer.push(targetNeedleAngle);
-        const avgAngle = needleBuffer.reduce((a, b) => a + b, 0) / needleBuffer.length;
-        targetAngle = Math.max(-50, Math.min(50, avgAngle));
+          if (holdFramesAfterPluck > 0) holdFramesAfterPluck--;
 
-        displayNote   = numberToNoteName(nearestNoteBuffered);
-        displayOctave = Math.floor(nearestNoteBuffered / 12) - 1;
-        displayCents  = cents;
-        displayFreq   = freq;
+          // Compute exact deviation in cents and needle angle relative to the committed display note
+          const bufferedNoteFreq = numberToFrequency(nearestNoteBuffered, A4_FREQ);
+          const bufFreqDiff = bufferedNoteFreq - freq;
+          const bufSemitoneStep = bufferedNoteFreq - numberToFrequency(nearestNoteBuffered - 1, A4_FREQ);
+          const targetNeedleAngle = -90 * ((bufFreqDiff / (bufSemitoneStep || 1)) * 2);
 
-        // Comprobación de afinación en el punto exacto (< 4 cents) y disparo del sonido (gtuner)
-        if (Math.abs(cents) <= 4) {
-          toneHitCounter++;
-          if (toneHitCounter >= 12) {
-            playSuccessChime();
+          needleBuffer.shift();
+          needleBuffer.push(targetNeedleAngle);
+          const avgAngle = needleBuffer.reduce((a, b) => a + b, 0) / needleBuffer.length;
+          targetAngle = Math.max(-50, Math.min(50, avgAngle));
+
+          const bufferedCents = bufSemitoneStep === 0 ? 0 : Math.max(-50, Math.min(50, -(bufFreqDiff / bufSemitoneStep) * 100));
+
+          displayNote   = numberToNoteName(nearestNoteBuffered);
+          displayOctave = Math.floor(nearestNoteBuffered / 12) - 1;
+          displayCents  = bufferedCents;
+          displayFreq   = freq;
+
+          // Comprobación de afinación en el punto exacto (< 5 cents) y disparo del sonido
+          if (Math.abs(bufferedCents) <= IN_TUNE_CENTS) {
+            toneHitCounter++;
+            if (toneHitCounter >= 12) {
+              playSuccessChime();
+              toneHitCounter = 0;
+            }
+          } else {
             toneHitCounter = 0;
           }
-        } else {
-          toneHitCounter = 0;
         }
       }
-    } else {
-      // Silence / no signal -> smoothly return needle to center
+    }
+
+    if (!validSignal) {
+      // Sound decaying into room ambient / silence:
+      // Gently glide the needle back to center without jumping or fluttering the chord
       needleBuffer.shift();
       needleBuffer.push(0);
       const avgAngle = needleBuffer.reduce((a, b) => a + b, 0) / needleBuffer.length;
       targetAngle = avgAngle;
-      displayCents *= 0.90;
+      displayCents *= 0.92;
       toneHitCounter = 0;
+      if (holdFramesAfterPluck > 0) holdFramesAfterPluck--;
     }
   }
 
   // ── Needle — responsive and fluid interpolation ──
-  needleAngle += (targetAngle - needleAngle) * 0.14;
+  needleAngle += (targetAngle - needleAngle) * 0.12;
 
   // ── Redraw meter ──
   mCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
   drawMeter(needleAngle);
 
-  // ── Update wheel & circle ──
+  // ── Update wheel & circle smoothly ──
   if (isRunning) updateNoteWheel(displayNote || 'E', displayCents, displayOctave, displayFreq);
 }
 

@@ -121,26 +121,26 @@ html, body {
 }
 
 /* Colour states — vibrant glowing states */
-.light-red {
-  color: #ff2a2a;
-  border-color: #aa2020;
+#indicator-light.light-red {
+  color: #ff2a2a !important;
+  border-color: #aa2020 !important;
   background: radial-gradient(circle at 50% 48%, #160404, #1c0505 55%, #260808) !important;
   box-shadow: 0 0 24px rgba(220,0,0,0.6), 0 0 6px #000,
-              inset 0 0 18px rgba(160,0,0,0.45);
+              inset 0 0 18px rgba(160,0,0,0.45) !important;
 }
-.light-green {
+#indicator-light.light-green {
   color: #2bff6e !important;
   border-color: #1ed760 !important;
   background: radial-gradient(circle at 50% 48%, #031c08, #05260c 55%, #083311) !important;
-  box-shadow: 0 0 32px rgba(43,255,110,0.8), 0 0 10px rgba(30,215,96,0.6), 0 0 6px #000,
-              inset 0 0 22px rgba(43,255,110,0.45) !important;
+  box-shadow: 0 0 35px rgba(43,255,110,0.9), 0 0 14px rgba(30,215,96,0.7), 0 0 6px #000,
+              inset 0 0 25px rgba(43,255,110,0.55) !important;
 }
-.light-yellow {
-  color: #ffee30;
-  border-color: #aaaa20;
+#indicator-light.light-yellow {
+  color: #ffee30 !important;
+  border-color: #aaaa20 !important;
   background: radial-gradient(circle at 50% 48%, #1a1603, #241e04 55%, #2e2606) !important;
-  box-shadow: 0 0 22px rgba(210,200,0,0.5), 0 0 6px #000,
-              inset 0 0 16px rgba(160,150,0,0.3);
+  box-shadow: 0 0 24px rgba(210,200,0,0.6), 0 0 6px #000,
+              inset 0 0 18px rgba(160,150,0,0.35) !important;
 }
 
 /* LCD note display inside the circle */
@@ -154,19 +154,19 @@ html, body {
 
 #nic-note {
   font-family: 'Courier New', 'Consolas', monospace;
-  font-size: 38px;
+  font-size: 48px;
   font-weight: 900;
   color: inherit;
-  text-shadow: 0 0 14px currentColor, 0 0 4px currentColor;
-  letter-spacing: -1px;
+  text-shadow: 0 0 16px currentColor, 0 0 5px currentColor;
+  letter-spacing: -1.5px;
 }
 
 #nic-oct {
   font-family: 'Courier New', 'Consolas', monospace;
-  font-size: 19px;
+  font-size: 22px;
   font-weight: bold;
   color: inherit;
-  margin-bottom: 5px;
+  margin-bottom: 6px;
   text-shadow: 0 0 10px currentColor;
   opacity: 0.9;
 }

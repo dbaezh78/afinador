@@ -765,77 +765,128 @@ function drawFretboardBg() {
 }
 
 // ═══════════════════════════════════════════════════════
-//  PITCH DETECTION — autocorrelation
+//  MATHEMATICAL FORMULAS (gtuner engine)
+// ═══════════════════════════════════════════════════════
+
+/** Converts frequency (Hz) to fractional MIDI note number (e.g. 440 Hz -> 69.0) */
+function frequencyToNumber(freq, a4 = A4_FREQ) {
+  if (!freq || freq <= 0) return 0;
+  return 12 * Math.log2(freq / a4) + 69;
+}
+
+/** Converts MIDI note number back to frequency in Hz */
+function numberToFrequency(number, a4 = A4_FREQ) {
+  return a4 * Math.pow(2.0, (number - 69) / 12.0);
+}
+
+/** Converts MIDI note number to note name string (e.g. 69 -> 'A') */
+function numberToNoteName(number) {
+  const idx = ((Math.round(number) % 12) + 12) % 12;
+  return NOTES[idx];
+}
+
+// ═══════════════════════════════════════════════════════
+//  PITCH DETECTION — gtuner trimmed autocorrelation
 // ═══════════════════════════════════════════════════════
 function detectPitch(buf, sampleRate) {
-  const SIZE  = buf.length;
-  const HALF  = Math.floor(SIZE / 2);
-
-  // RMS silence check
+  const size = buf.length;
   let rms = 0;
-  for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
-  rms = Math.sqrt(rms / SIZE);
-  if (rms < 0.005) return null; // Sensitive enough for soft low E2 plucks
 
-  // Autocorrelation calculation
-  const corr = new Float32Array(HALF);
-  for (let lag = 0; lag < HALF; lag++) {
-    let s = 0;
-    for (let i = 0; i < HALF; i++) s += buf[i] * buf[i + lag];
-    corr[lag] = s;
+  for (let i = 0; i < size; i++) {
+    const val = buf[i];
+    rms += val * val;
+  }
+  rms = Math.sqrt(rms / size);
+
+  // Minimum RMS threshold to filter ambient room noise
+  if (rms < 0.010) {
+    return null;
   }
 
-  // Find first trough (skip zero lag peak)
-  let d = 1;
-  while (d < HALF && corr[d] > corr[d - 1]) d++;
+  // Trim edges to find zero-crossings (as in gtuner)
+  let r1 = 0, r2 = size - 1, thres = 0.2;
+  for (let i = 0; i < size / 2; i++) {
+    if (Math.abs(buf[i]) < thres) { r1 = i; break; }
+  }
+  for (let i = 1; i < size / 2; i++) {
+    if (Math.abs(buf[size - i]) < thres) { r2 = size - i; break; }
+  }
 
-  // Find all significant peaks
-  // Guitar low E2 (82.4 Hz) at 44.1kHz has period ~535 samples, at 48kHz ~582 samples.
-  let maxV = -Infinity, maxP = -1;
-  for (let i = d; i < HALF; i++) {
-    if (corr[i] > maxV) {
-      maxV = corr[i];
-      maxP = i;
+  const trimmedBuf = buf.slice(r1, r2);
+  const trimmedLen = trimmedBuf.length;
+  if (trimmedLen < 256) return null;
+
+  const c = new Float32Array(trimmedLen);
+  for (let i = 0; i < trimmedLen; i++) {
+    let sum = 0;
+    for (let j = 0; j < trimmedLen - i; j++) {
+      sum += trimmedBuf[j] * trimmedBuf[j + i];
+    }
+    c[i] = sum;
+  }
+
+  let d = 0;
+  while (d < trimmedLen - 1 && c[d] > c[d + 1]) d++;
+
+  let maxval = -1, maxpos = -1;
+  for (let i = d; i < trimmedLen; i++) {
+    if (c[i] > maxval) {
+      maxval = c[i];
+      maxpos = i;
     }
   }
 
-  if (maxP === -1 || maxV / corr[0] < 0.78) return null; // threshold suited for acoustic guitars
+  if (maxpos === -1 || maxval / c[0] < 0.70) return null;
 
-  // Sub-harmonic check (prevents octave-jumping on low strings like E2 & A2)
+  // Subharmonic check to prevent octave jumps on guitar low strings (E2, A2)
   for (let sub = 2; sub <= 4; sub++) {
-    const subP = Math.round(maxP / sub);
-    if (subP > d && corr[subP] > 0.85 * maxV) {
-      maxP = subP;
+    const subP = Math.round(maxpos / sub);
+    if (subP > d && c[subP] > 0.82 * maxval) {
+      maxpos = subP;
       break;
     }
   }
 
-  // Parabolic interpolation for sub-sample accuracy
-  const y1  = corr[maxP - 1] ?? corr[maxP];
-  const y2  = corr[maxP];
-  const y3  = corr[maxP + 1] ?? corr[maxP];
-  const denom = 2 * (2 * y2 - y1 - y3);
-  const shift = denom !== 0 ? (y3 - y1) / denom : 0;
-  const detectedHz = sampleRate / (maxP + shift);
+  let T0 = maxpos;
+  // Parabolic interpolation for sub-sample precision
+  if (T0 > 0 && T0 < trimmedLen - 1) {
+    const x1 = c[T0 - 1], x2 = c[T0], x3 = c[T0 + 1];
+    const a = (x1 + x3 - 2 * x2) / 2;
+    const b = (x3 - x1) / 2;
+    if (a !== 0) {
+      T0 = T0 - b / (2 * a);
+    }
+  }
 
-  // Valid guitar frequency range filter: 65 Hz (below drop D) to 1200 Hz
-  if (detectedHz < 65 || detectedHz > 1500) return null;
-
-  return detectedHz;
+  const freq = sampleRate / T0;
+  // Valid guitar/instrument range: 60 Hz to 1200 Hz
+  if (freq >= 60 && freq <= 1200) {
+    return freq;
+  }
+  return null;
 }
 
-// ── Freq → note ──────────────────────────────────────
+// ── Freq → detailed note & cents (gtuner standard) ────
 function freqToNote(freq) {
   if (!freq || freq <= 0 || isNaN(freq)) return null;
-  const midiF   = 12 * Math.log2(freq / A4_FREQ) + A4_MIDI;
-  const midiR   = Math.round(midiF);
-  const cents   = (midiF - midiR) * 100;
-  const noteIdx = ((midiR % 12) + 12) % 12;
-  const octave  = Math.floor(midiR / 12) - 1;
 
-  if (octave < 1 || octave > 8) return null; // sanitize extreme octaves
+  const noteNumber = frequencyToNumber(freq, A4_FREQ);
+  const nearestNoteNumber = Math.round(noteNumber);
+  const nearestNoteFreq = numberToFrequency(nearestNoteNumber, A4_FREQ);
 
-  return { note: NOTES[noteIdx], octave, cents, freq };
+  const freqDifference = nearestNoteFreq - freq;
+  const semitoneStep = nearestNoteFreq - numberToFrequency(nearestNoteNumber - 1, A4_FREQ);
+
+  // Exact difference in cents
+  const diffCents = semitoneStep === 0 ? 0 : (freqDifference / semitoneStep) * 100;
+  const cents = Math.max(-50, Math.min(50, -diffCents));
+
+  const note = numberToNoteName(nearestNoteNumber);
+  const octave = Math.floor(nearestNoteNumber / 12) - 1;
+
+  if (octave < 1 || octave > 8) return null;
+
+  return { note, octave, cents, freq, noteNumber, nearestNoteNumber, freqDifference, semitoneStep };
 }
 
 // ═══════════════════════════════════════════════════════

@@ -85,8 +85,13 @@ function init() {
   buildNoteTrack();
   buildFretboard();
   resizeCanvases();
-  updateNoteWheel('E', 0);
+  updateNoteWheel('E', 0, 4, 329.6);
   showMicOverlay();
+
+  // Try to acquire wake lock by default (if supported and context allows)
+  if (wakeLockToggle && wakeLockToggle.checked) {
+    acquireWakeLock();
+  }
 
   window.addEventListener('resize', () => {
     resizeCanvases();
@@ -249,12 +254,16 @@ function buildFretboard() {
 
     // String thickness: visIdx 0 = thinnest (1.5 px), 5 = thickest (5 px)
     const sw = [1.5, 2, 2.5, 3.2, 4, 5][visIdx];
+    // String number: 1 for Mi4 (thinnest), up to 6 for Mi2 (thickest)
+    const stringNum = 6 - origIdx;
+    const freqLabel = str.freq.toFixed(1);
 
     row.innerHTML = `
       <div class="string-peg">
         <span class="note-name">${str.name}</span><span class="octave">${str.octave}</span>
       </div>
       <div class="string-line-wrap">
+        <span class="string-number">${stringNum} - &nbsp;${freqLabel}</span>
         <div class="string-line" style="--sw:${sw}px"></div>
         <canvas class="string-vibe-canvas"></canvas>
       </div>
@@ -266,23 +275,43 @@ function buildFretboard() {
 }
 
 function handleStringTap(idx, rowEl) {
-  // Improved guitar sound
-  playKarplusStrong(GUITAR_STRINGS[idx].freq, idx);
+  const str = GUITAR_STRINGS[idx];
+  const noteName = str.note.replace(/\d/, '');
 
-  // Visual vibration
+  // 1. Play real guitar string pluck
+  playKarplusStrong(str.freq, idx);
+
+  // 2. Animate physical string vibration wave
   startStringVibration(idx, rowEl);
 
-  // Toggle string lock
+  // 3. Immediately update UI to this exact string chord / note, octave, and Hz
+  displayNote   = noteName;
+  displayOctave = str.octave;
+  displayFreq   = str.freq;
+  displayCents  = 0;
+  targetAngle   = 0;
+  needleAngle   = 0;
+
+  // Redraw meter needle pointing to exact 0 (in-tune)
+  const dpr = window.devicePixelRatio || 1;
+  mCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawMeter(0);
+
+  // Update note wheel and frequency display
+  updateNoteWheel(noteName, 0, str.octave, str.freq);
+
+  // 4. Toggle string lock
   document.querySelectorAll('.string-row').forEach(r => r.classList.remove('active'));
   if (lockedString === idx) {
     lockedString = null;
   } else {
     lockedString = idx;
     rowEl.classList.add('active');
-    const s = GUITAR_STRINGS[idx];
-    const noteName = s.note.replace(/\d/, '');
-    displayNote = noteName;
-    updateNoteWheel(noteName, 0);
+  }
+
+  // Ensure wake lock is acquired on first interaction if enabled
+  if (wakeLockToggle && wakeLockToggle.checked && !wakeLockSentinel) {
+    acquireWakeLock();
   }
 }
 

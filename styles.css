@@ -399,6 +399,22 @@ html, body {
   overflow: visible;
 }
 
+/* String number and frequency in white above the string */
+.string-number {
+  position: absolute;
+  top: 1px;
+  left: 14px;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+  font-family: 'Segoe UI', Arial, sans-serif;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.95);
+  pointer-events: none;
+  z-index: 4;
+  opacity: 0.95;
+  letter-spacing: 0.8px;
+}
+
 /* The string line */
 .string-line {
   width: 100%;

@@ -356,6 +356,7 @@ function ensureAudioCtx() {
  */
 let isMuted = false;
 let lastChimeTime = 0;
+let chimeEndTime = 0; // Timestamp until which mic pitch input is suppressed to prevent self-feedback
 
 function playSuccessChime() {
   if (isMuted) return;
@@ -365,15 +366,18 @@ function playSuccessChime() {
   const now = performance.now();
   if (now - lastChimeTime < 900) return; // Prevent chime spamming
   lastChimeTime = now;
+  // Hold acoustic immunity for 380ms (sound duration 250ms + 130ms room acoustic decay)
+  chimeEndTime = now + 380;
 
   try {
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(880, audioCtx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(1760, audioCtx.currentTime + 0.15);
+    // Clean crystalline high-harmonic bell tone (1760 Hz to 2640 Hz, outside guitar range)
+    osc.frequency.setValueAtTime(1760, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(2640, audioCtx.currentTime + 0.12);
 
-    gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.25);
 
     osc.connect(gain);
@@ -1003,15 +1007,25 @@ function loop() {
 
   // ── Pitch detection ──
   if (analyser) {
+    const now = performance.now();
+    const isChimeActive = now < chimeEndTime;
+
     analyser.getFloatTimeDomainData(timeDomainBuf);
-    const pitchResult = detectPitch(timeDomainBuf, audioCtx.sampleRate);
+
+    // During the chime playback (self-sound), ignore mic input to prevent speaker-to-mic distortion
+    const pitchResult = isChimeActive ? null : detectPitch(timeDomainBuf, audioCtx.sampleRate);
 
     // Adaptive noise floor: decays slowly, rises when a strong pluck occurs
     peakRms *= 0.96;
 
     let validSignal = false;
 
-    if (pitchResult) {
+    if (isChimeActive) {
+      // Keep needle perfectly centered and green while chime sounds
+      targetAngle  = 0;
+      displayCents = 0;
+      validSignal  = true;
+    } else if (pitchResult) {
       const { freq, confidence, rms } = pitchResult;
 
       // Detect strong pluck (tope de la cuerda)

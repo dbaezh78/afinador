@@ -749,6 +749,53 @@ html, body {
   cursor: pointer;
 }
 
+/* ── Stepper arrow controls under the slider ── */
+.slider-stepper-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  padding: 0 4px;
+}
+
+.stepper-btn {
+  background: linear-gradient(180deg, #441616 0%, #290d0d 100%);
+  border: 1px solid rgba(200, 169, 90, 0.4);
+  color: var(--clr-cream);
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.stepper-btn:hover {
+  border-color: var(--clr-gold);
+  color: #fff;
+  background: linear-gradient(180deg, #5c1f1f 0%, #3a1313 100%);
+  box-shadow: 0 0 10px rgba(200, 169, 90, 0.35);
+}
+
+.stepper-btn:active {
+  transform: scale(0.94);
+  background: #200808;
+}
+
+.stepper-hint {
+  font-size: 11px;
+  color: #a08060;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
 /* ── Toggle switch ── */
 .toggle-switch {
   position: relative;

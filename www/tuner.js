@@ -1297,23 +1297,40 @@ if (chimeToggle) {
 const noiseSlider   = document.getElementById('noise-reduction-slider');
 const noiseValEl    = document.getElementById('noise-reduction-val');
 const btnResetNoise = document.getElementById('btn-reset-noise');
+const btnNoiseDown  = document.getElementById('btn-noise-down');
+const btnNoiseUp    = document.getElementById('btn-noise-up');
+
+function updateSensitivity(newVal) {
+  noiseReductionLevel = Math.max(0, Math.min(100, newVal));
+  if (noiseSlider) {
+    noiseSlider.value = noiseReductionLevel;
+  }
+  if (noiseValEl) {
+    noiseValEl.textContent = `${noiseReductionLevel}%`;
+  }
+}
 
 if (noiseSlider) {
   noiseSlider.addEventListener('input', () => {
-    noiseReductionLevel = parseInt(noiseSlider.value, 10) || 0;
-    if (noiseValEl) {
-      noiseValEl.textContent = `${noiseReductionLevel}%`;
-    }
+    updateSensitivity(parseInt(noiseSlider.value, 10) || 0);
+  });
+}
+
+if (btnNoiseDown) {
+  btnNoiseDown.addEventListener('click', () => {
+    updateSensitivity(noiseReductionLevel - 1);
+  });
+}
+
+if (btnNoiseUp) {
+  btnNoiseUp.addEventListener('click', () => {
+    updateSensitivity(noiseReductionLevel + 1);
   });
 }
 
 if (btnResetNoise && noiseSlider) {
   btnResetNoise.addEventListener('click', () => {
-    noiseReductionLevel = 70;
-    noiseSlider.value = 70;
-    if (noiseValEl) {
-      noiseValEl.textContent = '70%';
-    }
+    updateSensitivity(70);
   });
 }
 

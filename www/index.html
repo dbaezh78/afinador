@@ -4,7 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>♫ Afinador de Guitarra</title>
-  <link rel="stylesheet" href="styles.css?v=2.4" />
+  <link rel="icon" type="image/png" href="icon-playstore-512.png" />
+  <link rel="stylesheet" href="styles.css?v=2.5" />
 </head>
 <body>
   <div id="app">
@@ -136,6 +137,12 @@
                 <input type="range" id="noise-reduction-slider" min="0" max="100" value="70" step="1" />
                 <span class="slider-max">100</span>
               </div>
+              <!-- Stepper arrows for fine 1% adjustment -->
+              <div class="slider-stepper-row">
+                <button type="button" id="btn-noise-down" class="stepper-btn" title="Bajar 1%">◀ -1%</button>
+                <span class="stepper-hint">Ajuste fino</span>
+                <button type="button" id="btn-noise-up" class="stepper-btn" title="Subir 1%">+1% ▶</button>
+              </div>
             </div>
           </div>
 
@@ -152,6 +159,6 @@
 
   </div>
 
-  <script src="tuner.js?v=2.4"></script>
+  <script src="tuner.js?v=2.5"></script>
 </body>
 </html>
